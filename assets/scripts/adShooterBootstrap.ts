@@ -5,21 +5,15 @@ import {
     Color,
     Component,
     director,
-    Director,
     EventMouse,
     EventTouch,
-    Game,
-    game,
     Graphics,
     input,
     Input,
-    instantiate,
     Label,
     Layers,
     Node,
-    Prefab,
     ResolutionPolicy,
-    resources,
     Scene,
     UITransform,
     view,
@@ -27,7 +21,6 @@ import {
 
 const { ccclass } = _decorator;
 
-type UpgradeKey = 'fireRate' | 'bulletDamage' | 'multiShot' | 'moveSpeed';
 type GateType = 'mul' | 'add';
 type RunPhase = 'ready' | 'playing' | 'gameOver';
 
@@ -35,12 +28,14 @@ interface BulletEntity {
     node: Node;
     damage: number;
     speed: number;
+    worldX: number;
 }
 
 interface MonsterEntity {
     node: Node;
     hp: number;
     speed: number;
+    worldX: number;
 }
 
 interface GateEntity {
@@ -48,6 +43,8 @@ interface GateEntity {
     type: GateType;
     value: number;
     used: boolean;
+    speed: number;
+    worldX: number;
 }
 
 interface FloatingTextEntity {
@@ -65,7 +62,6 @@ interface TuningConfig {
     levelUpIntervalSec: number;
     baseMonsterSpeed: number;
     monsterSpeedPerLevel: number;
-    killsPerUpgrade: number;
 }
 
 @ccclass('AdShooterGame')
@@ -75,11 +71,9 @@ class AdShooterGame extends Component {
     private player: Node | null = null;
     private hudLabel: Label | null = null;
     private endLabel: Label | null = null;
-    private upgradePanel: Node | null = null;
     private restartButton: Node | null = null;
     private startPanel: Node | null = null;
     private startButton: Node | null = null;
-    private levelRoot: Node | null = null;
 
     private bullets: BulletEntity[] = [];
     private monsters: MonsterEntity[] = [];
@@ -92,14 +86,13 @@ class AdShooterGame extends Component {
     private difficultyTimer = 0;
     private touchX = 0;
     private hasTouch = false;
+    private playerWorldX = 0;
 
     private score = 0;
     private kills = 0;
     private level = 1;
-    private pendingUpgrade = false;
     private gameOver = false;
     private phase: RunPhase = 'ready';
-    private currentUpgradeOptions: UpgradeKey[] = [];
 
     private fireInterval = 0.28;
     private bulletDamage = 1;
@@ -116,17 +109,11 @@ class AdShooterGame extends Component {
         levelUpIntervalSec: 12,
         baseMonsterSpeed: 130,
         monsterSpeedPerLevel: 12,
-        killsPerUpgrade: 6,
     };
-
-    // Put your custom level prefab at: assets/resources/prefabs/Level.prefab
-    // Ensure the player node inside prefab is named exactly "Player".
-    private readonly levelPrefabPath = 'prefabs/Level';
-    private readonly playerNodeName = 'Player';
 
     onLoad() {
         this.applyPortraitLayout();
-        this.ensureCanvas();
+        setupCanvasCamera(director.getScene()!);
         this.createSceneNodes();
         this.bindInput();
         this.resetRun();
@@ -152,7 +139,7 @@ class AdShooterGame extends Component {
     }
 
     update(dt: number) {
-        if (this.phase !== 'playing' || this.pendingUpgrade || this.gameOver) return;
+        if (this.phase !== 'playing' || this.gameOver) return;
 
         this.difficultyTimer += dt;
         this.fireTimer += dt;
@@ -191,33 +178,31 @@ class AdShooterGame extends Component {
         }
     }
 
-    private ensureCanvas() {
-        let canvas = director.getScene()?.getChildByName('Canvas');
-        if (!canvas) {
-            canvas = new Node('Canvas');
-            canvas.layer = Layers.Enum.UI_2D;
-            canvas.addComponent(UITransform).setContentSize(view.getVisibleSize());
-            canvas.addComponent(Canvas);
-            director.getScene()?.addChild(canvas);
-            setupCanvasCamera(director.getScene()!);
-        }
-        this.node.setParent(canvas);
-    }
-
     private createSceneNodes() {
         const { vs, halfH } = this.layout();
 
-        this.worldRoot = new Node('WorldRoot');
-        this.worldRoot.layer = Layers.Enum.UI_2D;
-        this.worldRoot.addComponent(UITransform).setContentSize(vs);
-        this.node.addChild(this.worldRoot);
+        const scene = director.getScene();
+        const canvas = scene?.getChildByName('Canvas') ?? null;
+        this.uiRoot = canvas?.getChildByName('BattleScene') ?? canvas;
+        if (!this.uiRoot) {
+            this.uiRoot = new Node('UIRoot');
+            this.uiRoot.layer = Layers.Enum.UI_2D;
+            this.uiRoot.addComponent(UITransform).setContentSize(vs);
+            this.node.addChild(this.uiRoot);
+        }
 
-        this.uiRoot = new Node('UIRoot');
-        this.uiRoot.layer = Layers.Enum.UI_2D;
-        this.uiRoot.addComponent(UITransform).setContentSize(vs);
-        this.node.addChild(this.uiRoot);
+        // Current BattleContent/BattleScene assets are still UI-based.
+        // Keep gameplay entities under Canvas branch to ensure rendering.
+        let world = this.uiRoot.getChildByName('WorldRoot2D');
+        if (!world) {
+            world = new Node('WorldRoot2D');
+            world.layer = Layers.Enum.UI_2D;
+            world.addComponent(UITransform).setContentSize(vs);
+            this.uiRoot.addChild(world);
+        }
+        this.worldRoot = world;
+
         this.createFallbackPlayer();
-        this.tryLoadCustomLevelPrefab();
 
         this.hudLabel = this.createLabelNode('HUD', '', 26, new Color(255, 255, 255, 255));
         this.hudLabel.node.setPosition(0, halfH - 48, 0);
@@ -227,13 +212,6 @@ class AdShooterGame extends Component {
         this.endLabel.node.active = false;
         this.endLabel.node.setPosition(0, 0, 0);
         this.uiRoot.addChild(this.endLabel.node);
-
-        this.upgradePanel = new Node('UpgradePanel');
-        this.upgradePanel.layer = Layers.Enum.UI_2D;
-        this.upgradePanel.addComponent(UITransform).setContentSize(Math.min(700, vs.width - 20), 420);
-        this.upgradePanel.active = false;
-        this.upgradePanel.setPosition(0, 0, 0);
-        this.uiRoot.addChild(this.upgradePanel);
 
         this.restartButton = this.createRectNode('RestartButton', 220, 72, new Color(255, 180, 100, 255));
         this.restartButton.setPosition(0, -halfH + 180, 0);
@@ -265,47 +243,17 @@ class AdShooterGame extends Component {
     }
 
     private createFallbackPlayer() {
+        const existed = this.worldRoot?.getChildByName('Player') ?? null;
+        if (existed) {
+            this.player = existed;
+            return;
+        }
         const { halfH } = this.layout();
         this.player = this.createRectNode('Player', 72, 42, new Color(80, 220, 255, 255));
         this.player.setPosition(0, -halfH + 100, 0);
+        this.playerWorldX = 0;
+        this.applyPerspectiveScale(this.player, this.player.position.y, 0.52, 1);
         this.worldRoot?.addChild(this.player);
-    }
-
-    private tryLoadCustomLevelPrefab() {
-        resources.load(this.levelPrefabPath, Prefab, (err, prefab) => {
-            if (err || !prefab || !this.worldRoot) {
-                return;
-            }
-            const level = instantiate(prefab);
-            level.name = 'CustomLevel';
-            this.worldRoot.addChild(level);
-            this.levelRoot = level;
-
-            const customPlayer = this.findNodeByName(level, this.playerNodeName);
-            if (!customPlayer) {
-                return;
-            }
-
-            if (this.player && this.player !== customPlayer && this.player.isValid && this.player.parent === this.worldRoot) {
-                this.player.destroy();
-            }
-
-            customPlayer.layer = Layers.Enum.UI_2D;
-            this.player = customPlayer;
-            const { halfH } = this.layout();
-            if (Math.abs(this.player.position.y) < 1) {
-                this.player.setPosition(this.player.position.x, -halfH + 100, this.player.position.z);
-            }
-        });
-    }
-
-    private findNodeByName(root: Node, name: string): Node | null {
-        if (root.name === name) return root;
-        for (const c of root.children) {
-            const found = this.findNodeByName(c, name);
-            if (found) return found;
-        }
-        return null;
     }
 
     private bindInput() {
@@ -341,10 +289,6 @@ class AdShooterGame extends Component {
     }
 
     private handleUiTap(x: number, y: number) {
-        if (this.pendingUpgrade) {
-            this.confirmUpgradeByTap();
-            return;
-        }
         if (this.phase === 'ready') {
             this.beginRun();
             return;
@@ -356,14 +300,17 @@ class AdShooterGame extends Component {
 
     private updatePlayer(dt: number) {
         if (!this.player) return;
-        const { halfW } = this.layout();
+        const { halfW, halfH } = this.layout();
         const current = this.player.position.clone();
         const maxX = halfW - 40;
-        const desiredX = this.hasTouch ? this.touchX : current.x;
+        const desiredX = this.hasTouch ? this.touchX : this.playerWorldX;
         const targetX = Math.max(-maxX, Math.min(maxX, desiredX));
         const step = this.moveSpeed * dt;
-        const nextX = this.moveToward(current.x, targetX, step);
-        this.player.setPosition(nextX, current.y, 0);
+        this.playerWorldX = this.moveToward(this.playerWorldX, targetX, step);
+        const y = -halfH + 100;
+        const renderX = this.projectXByY(this.playerWorldX, y);
+        this.player.setPosition(renderX, y, 0);
+        this.applyPerspectiveScale(this.player, y, 0.52, 1);
     }
 
     private spawnBullets() {
@@ -373,9 +320,12 @@ class AdShooterGame extends Component {
         const startX = -spread * (total - 1) * 0.5;
         for (let i = 0; i < total; i++) {
             const bullet = this.createRectNode('Bullet', 12, 24, new Color(255, 235, 90, 255));
-            bullet.setPosition(this.player.position.x + startX + i * spread, this.player.position.y + 36, 0);
+            const y = this.player.position.y + 36;
+            const worldX = this.playerWorldX + startX + i * spread;
+            bullet.setPosition(this.projectXByY(worldX, y), y, 0);
+            this.applyPerspectiveScale(bullet, y, 0.35, 0.9);
             this.worldRoot.addChild(bullet);
-            this.bullets.push({ node: bullet, damage: this.bulletDamage, speed: 900 });
+            this.bullets.push({ node: bullet, damage: this.bulletDamage, speed: 900, worldX });
         }
     }
 
@@ -383,15 +333,17 @@ class AdShooterGame extends Component {
         if (!this.worldRoot) return;
         const { halfW, halfH } = this.layout();
         const xBound = halfW - 28;
-        const x = -xBound + Math.random() * xBound * 2;
+        const worldX = -xBound + Math.random() * xBound * 2;
         const hp = Math.max(1, Math.floor(1 + this.level * 0.45 + Math.random() * this.level * 0.35));
         const speed = this.monsterBaseSpeed + Math.random() * 70;
         const monster = this.createRectNode('Monster', 56, 56, new Color(255, 120, 120, 255));
-        monster.setPosition(x, halfH - 100, 0);
+        const y = halfH - 100;
+        monster.setPosition(this.projectXByY(worldX, y), y, 0);
+        this.applyPerspectiveScale(monster, y, 0.45, 1.3);
         const hpLabel = this.createLabelNode('HP', `${hp}`, 22, new Color(0, 0, 0, 255));
         monster.addChild(hpLabel.node);
         this.worldRoot.addChild(monster);
-        this.monsters.push({ node: monster, hp, speed });
+        this.monsters.push({ node: monster, hp, speed, worldX });
     }
 
     private spawnGateRow() {
@@ -401,8 +353,12 @@ class AdShooterGame extends Component {
         const gy = halfH - 200;
         const leftGate = this.createGate(Math.random() > 0.5 ? 'mul' : 'add');
         const rightGate = this.createGate(Math.random() > 0.5 ? 'mul' : 'add');
-        leftGate.node.setPosition(-gx, gy, 0);
-        rightGate.node.setPosition(gx, gy, 0);
+        leftGate.worldX = -gx;
+        rightGate.worldX = gx;
+        leftGate.node.setPosition(this.projectXByY(leftGate.worldX, gy), gy, 0);
+        rightGate.node.setPosition(this.projectXByY(rightGate.worldX, gy), gy, 0);
+        this.applyPerspectiveScale(leftGate.node, gy, 0.5, 1.25);
+        this.applyPerspectiveScale(rightGate.node, gy, 0.5, 1.25);
         this.worldRoot.addChild(leftGate.node);
         this.worldRoot.addChild(rightGate.node);
         this.gates.push(leftGate, rightGate);
@@ -413,7 +369,7 @@ class AdShooterGame extends Component {
         const value = type === 'mul' ? (Math.random() > 0.5 ? 2 : 3) : (Math.random() > 0.5 ? 1 : 2);
         const label = this.createLabelNode('GateText', type === 'mul' ? `x${value}` : `+${value}`, 32, new Color(10, 20, 50, 255));
         node.addChild(label.node);
-        return { node, type, value, used: false };
+        return { node, type, value, used: false, speed: 220, worldX: 0 };
     }
 
     private updateBullets(dt: number) {
@@ -421,8 +377,10 @@ class AdShooterGame extends Component {
         const topY = halfH - 20;
         this.bullets = this.bullets.filter((b) => {
             if (!b.node.isValid) return false;
-            b.node.setPosition(b.node.position.x, b.node.position.y + b.speed * dt, 0);
-            if (b.node.position.y > topY) {
+            const y = b.node.position.y + b.speed * dt;
+            b.node.setPosition(this.projectXByY(b.worldX, y), y, 0);
+            this.applyPerspectiveScale(b.node, y, 0.35, 0.9);
+            if (y > topY) {
                 b.node.destroy();
                 return false;
             }
@@ -435,8 +393,10 @@ class AdShooterGame extends Component {
         const bottomY = -halfH - 40;
         this.monsters = this.monsters.filter((m) => {
             if (!m.node.isValid) return false;
-            m.node.setPosition(m.node.position.x, m.node.position.y - m.speed * dt, 0);
-            if (m.node.position.y < bottomY) {
+            const y = m.node.position.y - m.speed * dt;
+            m.node.setPosition(this.projectXByY(m.worldX, y), y, 0);
+            this.applyPerspectiveScale(m.node, y, 0.45, 1.35);
+            if (y < bottomY) {
                 m.node.destroy();
                 return false;
             }
@@ -449,8 +409,10 @@ class AdShooterGame extends Component {
         const bottomY = -halfH + 20;
         this.gates = this.gates.filter((g) => {
             if (!g.node.isValid) return false;
-            g.node.setPosition(g.node.position.x, g.node.position.y - 220 * dt, 0);
-            if (g.node.position.y < bottomY) {
+            const y = g.node.position.y - g.speed * dt;
+            g.node.setPosition(this.projectXByY(g.worldX, y), y, 0);
+            this.applyPerspectiveScale(g.node, y, 0.5, 1.25);
+            if (y < bottomY) {
                 g.node.destroy();
                 return false;
             }
@@ -493,9 +455,6 @@ class AdShooterGame extends Component {
                     monster.node.destroy();
                     this.monsters.splice(mi, 1);
                     this.updateHud();
-                    if (this.kills > 0 && this.kills % this.tuning.killsPerUpgrade === 0) {
-                        this.showUpgradeChoices();
-                    }
                 } else {
                     const hpLabel = monster.node.getComponentInChildren(Label);
                     if (hpLabel) hpLabel.string = `${monster.hp}`;
@@ -535,98 +494,6 @@ class AdShooterGame extends Component {
         this.updateHud();
     }
 
-    private showUpgradeChoices() {
-        if (!this.upgradePanel || this.pendingUpgrade || this.gameOver) return;
-        const { vs, halfW } = this.layout();
-        this.pendingUpgrade = true;
-        this.upgradePanel.removeAllChildren();
-        this.upgradePanel.active = true;
-        this.upgradePanel.getComponent(UITransform)?.setContentSize(Math.min(700, vs.width - 20), 420);
-
-        const title = this.createLabelNode('UpgradeTitle', '选择升级', 32, new Color(255, 255, 255, 255));
-        title.node.setPosition(0, 150, 0);
-        this.upgradePanel.addChild(title.node);
-
-        const options = this.pickUpgrades(3);
-        this.currentUpgradeOptions = options;
-        const useVertical = halfW * 2 < 600;
-        for (let i = 0; i < options.length; i++) {
-            const key = options[i];
-            const bw = useVertical ? Math.min(200, halfW * 2 - 60) : 180;
-            const bh = useVertical ? 72 : 86;
-            const btn = this.createRectNode(`Upgrade-${key}`, bw, bh, new Color(100, 220, 150, 255));
-            if (useVertical) {
-                btn.setPosition(0, 50 - i * 95, 0);
-            } else {
-                const startX = -220;
-                btn.setPosition(startX + i * 220, -20, 0);
-            }
-            const lb = this.createLabelNode('Text', this.upgradeText(key), 24, new Color(20, 40, 20, 255));
-            btn.addChild(lb.node);
-            this.upgradePanel.addChild(btn);
-            const onChoose = () => {
-                this.applyUpgrade(key);
-                this.upgradePanel!.active = false;
-                this.pendingUpgrade = false;
-                this.currentUpgradeOptions = [];
-                this.updateHud();
-            };
-            btn.on(Node.EventType.TOUCH_END, onChoose);
-            btn.on(Node.EventType.MOUSE_UP, onChoose);
-        }
-    }
-
-    private confirmUpgradeByTap() {
-        if (!this.pendingUpgrade || this.currentUpgradeOptions.length === 0) {
-            return;
-        }
-        const pick = this.currentUpgradeOptions[Math.floor(Math.random() * this.currentUpgradeOptions.length)];
-        this.applyUpgrade(pick);
-        if (this.upgradePanel) {
-            this.upgradePanel.active = false;
-        }
-        this.pendingUpgrade = false;
-        this.currentUpgradeOptions = [];
-        this.updateHud();
-    }
-
-    private applyUpgrade(key: UpgradeKey) {
-        switch (key) {
-            case 'fireRate':
-                this.fireInterval = Math.max(0.09, this.fireInterval - 0.05);
-                break;
-            case 'bulletDamage':
-                this.bulletDamage += 1;
-                break;
-            case 'multiShot':
-                this.multiShot = Math.min(9, this.multiShot + 1);
-                break;
-            case 'moveSpeed':
-                this.moveSpeed += 80;
-                break;
-        }
-    }
-
-    private upgradeText(key: UpgradeKey) {
-        switch (key) {
-            case 'fireRate': return 'ATK SPD +';
-            case 'bulletDamage': return 'DMG +';
-            case 'multiShot': return 'SHOT +1';
-            case 'moveSpeed': return 'MOVE +';
-        }
-    }
-
-    private pickUpgrades(n: number): UpgradeKey[] {
-        const all: UpgradeKey[] = ['fireRate', 'bulletDamage', 'multiShot', 'moveSpeed'];
-        const result: UpgradeKey[] = [];
-        while (result.length < n && all.length > 0) {
-            const idx = Math.floor(Math.random() * all.length);
-            result.push(all[idx]);
-            all.splice(idx, 1);
-        }
-        return result;
-    }
-
     private triggerGameOver() {
         this.gameOver = true;
         this.phase = 'gameOver';
@@ -663,7 +530,6 @@ class AdShooterGame extends Component {
         this.score = 0;
         this.kills = 0;
         this.level = 1;
-        this.pendingUpgrade = false;
         this.gameOver = false;
         this.fireTimer = 0;
         this.monsterTimer = 0;
@@ -684,13 +550,8 @@ class AdShooterGame extends Component {
             this.endLabel.node.active = false;
             this.endLabel.string = '';
         }
-        if (this.upgradePanel) {
-            this.upgradePanel.active = false;
-            this.upgradePanel.removeAllChildren();
-        }
         if (this.restartButton) this.restartButton.active = false;
         if (this.startPanel) this.startPanel.active = true;
-        this.currentUpgradeOptions = [];
         this.updateHud();
     }
 
@@ -734,15 +595,33 @@ class AdShooterGame extends Component {
         if (!ta || !tb) return false;
         const ap = a.worldPosition;
         const bp = b.worldPosition;
-        return Math.abs(ap.x - bp.x) * 2 < ta.contentSize.x + tb.contentSize.x &&
-            Math.abs(ap.y - bp.y) * 2 < ta.contentSize.y + tb.contentSize.y;
+        const aw = ta.contentSize.x * Math.abs(a.worldScale.x);
+        const ah = ta.contentSize.y * Math.abs(a.worldScale.y);
+        const bw = tb.contentSize.x * Math.abs(b.worldScale.x);
+        const bh = tb.contentSize.y * Math.abs(b.worldScale.y);
+        return Math.abs(ap.x - bp.x) * 2 < aw + bw &&
+            Math.abs(ap.y - bp.y) * 2 < ah + bh;
     }
 
-    private isPointInNode(node: Node, x: number, y: number): boolean {
-        const ui = node.getComponent(UITransform);
-        if (!ui) return false;
-        const rect = ui.getBoundingBoxToWorld();
-        return rect.contains({ x, y });
+    private getPerspectiveTByY(y: number): number {
+        const { halfH } = this.layout();
+        const farY = halfH - 140;
+        const nearY = -halfH + 120;
+        const raw = (y - farY) / (nearY - farY);
+        return Math.max(0, Math.min(1, raw));
+    }
+
+    private projectXByY(worldX: number, y: number): number {
+        const t = this.getPerspectiveTByY(y);
+        const widthFactor = 0.22 + 0.78 * t; // far narrower, near wider
+        return worldX * widthFactor;
+    }
+
+    private applyPerspectiveScale(node: Node, y: number, farScale: number, nearScale: number) {
+        const t = this.getPerspectiveTByY(y);
+        const curved = t * t;
+        const s = farScale + (nearScale - farScale) * curved;
+        node.setScale(s, s, 1);
     }
 
     private moveToward(from: number, to: number, delta: number): number {
@@ -769,38 +648,4 @@ function setupCanvasCamera(scene: Scene) {
     }
 }
 
-function mountAdShooter() {
-    applyDesignResolution();
-    const scene = director.getScene();
-    if (!scene) return;
-
-    let canvas = scene.getChildByName('Canvas');
-    if (!canvas) {
-        canvas = new Node('Canvas');
-        canvas.layer = Layers.Enum.UI_2D;
-        applyDesignResolution();
-        canvas.addComponent(UITransform).setContentSize(view.getVisibleSize());
-        canvas.addComponent(Canvas);
-        scene.addChild(canvas);
-    }
-    setupCanvasCamera(scene);
-
-    let root = canvas.getChildByName('AdShooterRoot');
-    if (!root) {
-        root = new Node('AdShooterRoot');
-        root.layer = Layers.Enum.UI_2D;
-        root.addComponent(UITransform).setContentSize(view.getVisibleSize());
-        canvas.addChild(root);
-        root.addComponent(AdShooterGame);
-    }
-}
-
-game.once(Game.EVENT_GAME_INITED, () => {
-    applyDesignResolution();
-    director.on(Director.EVENT_AFTER_SCENE_LAUNCH, () => {
-        applyDesignResolution();
-        mountAdShooter();
-    });
-    mountAdShooter();
-});
 
