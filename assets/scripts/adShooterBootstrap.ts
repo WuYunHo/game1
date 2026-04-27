@@ -10,16 +10,18 @@ import {
     Graphics,
     input,
     Input,
+    instantiate,
     Label,
     Layers,
     Node,
     ResolutionPolicy,
     Scene,
     UITransform,
+    Vec3,
     view,
 } from 'cc';
 
-const { ccclass } = _decorator;
+const { ccclass, property } = _decorator;
 
 type GateType = 'mul' | 'add';
 type RunPhase = 'ready' | 'playing' | 'gameOver';
@@ -28,14 +30,16 @@ interface BulletEntity {
     node: Node;
     damage: number;
     speed: number;
-    worldX: number;
+    lane: number;
+    z: number;
 }
 
 interface MonsterEntity {
     node: Node;
     hp: number;
     speed: number;
-    worldX: number;
+    lane: number;
+    z: number;
 }
 
 interface GateEntity {
@@ -44,7 +48,10 @@ interface GateEntity {
     value: number;
     used: boolean;
     speed: number;
-    worldX: number;
+    laneStart: number;
+    laneEnd: number;
+    centerLane: number;
+    z: number;
 }
 
 interface FloatingTextEntity {
@@ -66,8 +73,31 @@ interface TuningConfig {
 
 @ccclass('AdShooterGame')
 class AdShooterGame extends Component {
+    private readonly laneCount = 12;
+    private readonly gateWidthInLanes = 6;
+    private readonly gridRows = 40;
+    private readonly worldLaneWidth = 1.6;
+    private readonly farDepth = 42;
+    private readonly nearDepth = 10;
+    private readonly playY = -2.8;
+    private readonly playerZ = 6;
+    private readonly monsterSpawnZ = 44;
+    private readonly gateSpawnZ = 36;
+    private readonly bulletSpeed3D = 28;
+    private readonly gateSpeed3D = 4.2;
+    private readonly showGrid = false;
+    private readonly showDebugMarker = false;
     private worldRoot: Node | null = null;
     private uiRoot: Node | null = null;
+    private gridOverlay: Node | null = null;
+    private world3DRoot: Node | null = null;
+    private cubeTemplate: Node | null = null;
+    private debugMarker: Node | null = null;
+
+    @property(Camera)
+    projectorCamera: Camera | null = null;
+
+    private readonly tmpScreen = new Vec3();
     private player: Node | null = null;
     private hudLabel: Label | null = null;
     private endLabel: Label | null = null;
@@ -84,9 +114,8 @@ class AdShooterGame extends Component {
     private monsterTimer = 0;
     private gateTimer = 0;
     private difficultyTimer = 0;
-    private touchX = 0;
-    private hasTouch = false;
-    private playerWorldX = 0;
+    private playerLane = 5.5;
+    private targetLane = 5.5;
 
     private score = 0;
     private kills = 0;
@@ -97,8 +126,8 @@ class AdShooterGame extends Component {
     private fireInterval = 0.28;
     private bulletDamage = 1;
     private multiShot = 1;
-    private moveSpeed = 650;
-    private monsterBaseSpeed = 130;
+    private laneMoveSpeed = 12;
+    private monsterBaseSpeed = 6.5;
 
     private tuning: TuningConfig = {
         baseFireInterval: 0.28,
@@ -107,16 +136,57 @@ class AdShooterGame extends Component {
         minMonsterSpawnInterval: 0.2,
         gateSpawnInterval: 3,
         levelUpIntervalSec: 12,
-        baseMonsterSpeed: 130,
-        monsterSpeedPerLevel: 12,
+        baseMonsterSpeed: 6.5,
+        monsterSpeedPerLevel: 0.45,
     };
 
     onLoad() {
         this.applyPortraitLayout();
-        setupCanvasCamera(director.getScene()!);
+        const scene = director.getScene()!;
+        setupCanvasCamera(scene);
+        this.setupPerspectiveProjector(scene);
         this.createSceneNodes();
         this.bindInput();
         this.resetRun();
+    }
+
+    private setupPerspectiveProjector(scene: Scene) {
+        const mainCam = scene.getChildByName('Main Camera')?.getComponent(Camera) ?? null;
+        if (this.projectorCamera) {
+            if (mainCam && this.projectorCamera === mainCam) {
+                this.projectorCamera = null;
+            } else {
+                this.configureProjectorCamera(this.projectorCamera);
+                this.projectorCamera.node.setPosition(0, 13, -18);
+                this.projectorCamera.node.lookAt(new Vec3(0, 0, 20));
+                return;
+            }
+        }
+        let camNode = scene.getChildByName('PerspectiveProjector');
+        if (!camNode) {
+            camNode = new Node('PerspectiveProjector');
+            scene.addChild(camNode);
+        }
+        let cam = camNode.getComponent(Camera);
+        if (!cam) {
+            cam = camNode.addComponent(Camera);
+        }
+        this.configureProjectorCamera(cam);
+        camNode.setPosition(0, 13, -18);
+        camNode.lookAt(new Vec3(0, 0, 20));
+        this.projectorCamera = cam;
+    }
+
+    private configureProjectorCamera(cam: Camera) {
+        cam.projection = 1;
+        cam.fov = 45;
+        cam.near = 0.1;
+        cam.far = 2000;
+        // Real 3D rendering camera for gameplay entities.
+        cam.visibility = 0xffffffff;
+        cam.clearFlags = 14 as never;
+        cam.priority = 0;
+        (cam as unknown as { clearColor: Color }).clearColor = new Color(20, 28, 46, 255);
     }
 
     private applyPortraitLayout() {
@@ -201,6 +271,8 @@ class AdShooterGame extends Component {
             this.uiRoot.addChild(world);
         }
         this.worldRoot = world;
+        this.createOrUpdateGridOverlay();
+        this.setup3DWorld(scene);
 
         this.createFallbackPlayer();
 
@@ -242,18 +314,42 @@ class AdShooterGame extends Component {
         this.startButton.on(Node.EventType.MOUSE_UP, () => this.beginRun());
     }
 
+    private setup3DWorld(scene: Scene | null) {
+        if (!scene) return;
+        let root = scene.getChildByName('World3D');
+        if (!root) {
+            root = new Node('World3D');
+            root.layer = Layers.Enum.DEFAULT;
+            scene.addChild(root);
+        }
+        this.world3DRoot = root;
+
+        const maybeCube = this.node.getChildByName('view')?.getChildByName('Cube') ?? null;
+        this.cubeTemplate = maybeCube;
+        if (this.cubeTemplate) {
+            this.cubeTemplate.active = false;
+            this.cubeTemplate.layer = Layers.Enum.DEFAULT;
+        }
+
+        if (this.showDebugMarker) {
+            if (this.debugMarker?.isValid) {
+                this.debugMarker.destroy();
+            }
+            this.debugMarker = this.create3DEntityNode('DebugMarker', 4, 4, 4);
+            this.debugMarker.setPosition(0, 2.5, 20);
+        }
+    }
+
     private createFallbackPlayer() {
-        const existed = this.worldRoot?.getChildByName('Player') ?? null;
+        const existed = this.world3DRoot?.getChildByName('Player') ?? null;
         if (existed) {
             this.player = existed;
             return;
         }
-        const { halfH } = this.layout();
-        this.player = this.createRectNode('Player', 72, 42, new Color(80, 220, 255, 255));
-        this.player.setPosition(0, -halfH + 100, 0);
-        this.playerWorldX = 0;
-        this.applyPerspectiveScale(this.player, this.player.position.y, 0.52, 1);
-        this.worldRoot?.addChild(this.player);
+        this.player = this.create3DEntityNode('Player', 2.4, 1.0, 3.2);
+        this.set3DPosition(this.player, this.playerLane, this.playerZ, this.playY + 1.0);
+        this.playerLane = (this.laneCount - 1) * 0.5;
+        this.targetLane = this.playerLane;
     }
 
     private bindInput() {
@@ -268,14 +364,12 @@ class AdShooterGame extends Component {
         const last = input.getTouch(0);
         if (!last) return;
         const p = last.getUILocation();
-        this.touchX = p.x - this.layout().halfW;
-        this.hasTouch = true;
+        this.targetLane = this.uiXToLane(p.x);
     }
 
     private onMouseMove(event: EventMouse) {
         const p = event.getUILocation();
-        this.touchX = p.x - this.layout().halfW;
-        this.hasTouch = true;
+        this.targetLane = this.uiXToLane(p.x);
     }
 
     private onTouchEnd(event: EventTouch) {
@@ -300,87 +394,71 @@ class AdShooterGame extends Component {
 
     private updatePlayer(dt: number) {
         if (!this.player) return;
-        const { halfW, halfH } = this.layout();
-        const current = this.player.position.clone();
-        const maxX = halfW - 40;
-        const desiredX = this.hasTouch ? this.touchX : this.playerWorldX;
-        const targetX = Math.max(-maxX, Math.min(maxX, desiredX));
-        const step = this.moveSpeed * dt;
-        this.playerWorldX = this.moveToward(this.playerWorldX, targetX, step);
-        const y = -halfH + 100;
-        const renderX = this.projectXByY(this.playerWorldX, y);
-        this.player.setPosition(renderX, y, 0);
-        this.applyPerspectiveScale(this.player, y, 0.52, 1);
+        // Keep horizontal movement tightly synced with pointer.
+        this.playerLane = this.targetLane;
+        this.set3DPosition(this.player, this.playerLane, this.playerZ, this.playY + 1.0);
     }
 
     private spawnBullets() {
-        if (!this.player || !this.worldRoot) return;
-        const spread = 28;
+        if (!this.player || !this.world3DRoot) return;
+        const spreadInLane = 0.42;
         const total = Math.max(1, this.multiShot);
-        const startX = -spread * (total - 1) * 0.5;
+        const startLane = this.playerLane - spreadInLane * (total - 1) * 0.5;
         for (let i = 0; i < total; i++) {
-            const bullet = this.createRectNode('Bullet', 12, 24, new Color(255, 235, 90, 255));
-            const y = this.player.position.y + 36;
-            const worldX = this.playerWorldX + startX + i * spread;
-            bullet.setPosition(this.projectXByY(worldX, y), y, 0);
-            this.applyPerspectiveScale(bullet, y, 0.35, 0.9);
-            this.worldRoot.addChild(bullet);
-            this.bullets.push({ node: bullet, damage: this.bulletDamage, speed: 900, worldX });
+            const bullet = this.create3DEntityNode('Bullet', 0.35, 0.35, 1.1);
+            const z = this.playerZ + 1.5;
+            const lane = startLane + i * spreadInLane;
+            this.set3DPosition(bullet, lane, z, this.playY + 1.2);
+            this.bullets.push({ node: bullet, damage: this.bulletDamage, speed: this.bulletSpeed3D, lane, z });
         }
     }
 
     private spawnMonster() {
-        if (!this.worldRoot) return;
-        const { halfW, halfH } = this.layout();
-        const xBound = halfW - 28;
-        const worldX = -xBound + Math.random() * xBound * 2;
+        if (!this.world3DRoot) return;
+        const lane = Math.floor(Math.random() * this.laneCount);
         const hp = Math.max(1, Math.floor(1 + this.level * 0.45 + Math.random() * this.level * 0.35));
-        const speed = this.monsterBaseSpeed + Math.random() * 70;
-        const monster = this.createRectNode('Monster', 56, 56, new Color(255, 120, 120, 255));
-        const y = halfH - 100;
-        monster.setPosition(this.projectXByY(worldX, y), y, 0);
-        this.applyPerspectiveScale(monster, y, 0.45, 1.3);
-        const hpLabel = this.createLabelNode('HP', `${hp}`, 22, new Color(0, 0, 0, 255));
-        monster.addChild(hpLabel.node);
-        this.worldRoot.addChild(monster);
-        this.monsters.push({ node: monster, hp, speed, worldX });
+        const speed = this.monsterBaseSpeed + Math.random() * 0.8;
+        const monster = this.create3DEntityNode('Monster', 2.0, 2.0, 2.0);
+        const z = this.monsterSpawnZ;
+        this.set3DPosition(monster, lane, z, this.playY + 1.0);
+        this.monsters.push({ node: monster, hp, speed, lane, z });
     }
 
     private spawnGateRow() {
-        if (!this.worldRoot) return;
-        const { halfW, halfH } = this.layout();
-        const gx = Math.min(150, halfW * 0.42);
-        const gy = halfH - 200;
-        const leftGate = this.createGate(Math.random() > 0.5 ? 'mul' : 'add');
-        const rightGate = this.createGate(Math.random() > 0.5 ? 'mul' : 'add');
-        leftGate.worldX = -gx;
-        rightGate.worldX = gx;
-        leftGate.node.setPosition(this.projectXByY(leftGate.worldX, gy), gy, 0);
-        rightGate.node.setPosition(this.projectXByY(rightGate.worldX, gy), gy, 0);
-        this.applyPerspectiveScale(leftGate.node, gy, 0.5, 1.25);
-        this.applyPerspectiveScale(rightGate.node, gy, 0.5, 1.25);
-        this.worldRoot.addChild(leftGate.node);
-        this.worldRoot.addChild(rightGate.node);
+        if (!this.world3DRoot) return;
+        const z = this.gateSpawnZ;
+        const leftGate = this.createGate(Math.random() > 0.5 ? 'mul' : 'add', 0, this.gateWidthInLanes - 1);
+        const rightGate = this.createGate(Math.random() > 0.5 ? 'mul' : 'add', this.gateWidthInLanes, this.laneCount - 1);
+        leftGate.z = z;
+        rightGate.z = z;
+        this.set3DPosition(leftGate.node, leftGate.centerLane, z, this.playY + 1.0);
+        this.set3DPosition(rightGate.node, rightGate.centerLane, z, this.playY + 1.0);
         this.gates.push(leftGate, rightGate);
     }
 
-    private createGate(type: GateType): GateEntity {
-        const node = this.createRectNode('Gate', 150, 56, new Color(120, 180, 255, 220));
+    private createGate(type: GateType, laneStart: number, laneEnd: number): GateEntity {
+        const laneSpan = laneEnd - laneStart + 1;
+        const node = this.create3DEntityNode('Gate', laneSpan * 1.2, 1.2, 1.4);
         const value = type === 'mul' ? (Math.random() > 0.5 ? 2 : 3) : (Math.random() > 0.5 ? 1 : 2);
-        const label = this.createLabelNode('GateText', type === 'mul' ? `x${value}` : `+${value}`, 32, new Color(10, 20, 50, 255));
-        node.addChild(label.node);
-        return { node, type, value, used: false, speed: 220, worldX: 0 };
+        return {
+            node,
+            type,
+            value,
+            used: false,
+            speed: this.gateSpeed3D,
+            laneStart,
+            laneEnd,
+            centerLane: (laneStart + laneEnd) * 0.5,
+            z: this.gateSpawnZ,
+        };
     }
 
     private updateBullets(dt: number) {
-        const { halfH } = this.layout();
-        const topY = halfH - 20;
         this.bullets = this.bullets.filter((b) => {
             if (!b.node.isValid) return false;
-            const y = b.node.position.y + b.speed * dt;
-            b.node.setPosition(this.projectXByY(b.worldX, y), y, 0);
-            this.applyPerspectiveScale(b.node, y, 0.35, 0.9);
-            if (y > topY) {
+            b.z += b.speed * dt;
+            this.set3DPosition(b.node, b.lane, b.z, this.playY + 1.2);
+            if (b.z > this.monsterSpawnZ + 6) {
                 b.node.destroy();
                 return false;
             }
@@ -389,14 +467,11 @@ class AdShooterGame extends Component {
     }
 
     private updateMonsters(dt: number) {
-        const { halfH } = this.layout();
-        const bottomY = -halfH - 40;
         this.monsters = this.monsters.filter((m) => {
             if (!m.node.isValid) return false;
-            const y = m.node.position.y - m.speed * dt;
-            m.node.setPosition(this.projectXByY(m.worldX, y), y, 0);
-            this.applyPerspectiveScale(m.node, y, 0.45, 1.35);
-            if (y < bottomY) {
+            m.z -= m.speed * dt;
+            this.set3DPosition(m.node, m.lane, m.z, this.playY + 1.0);
+            if (m.z < this.playerZ - 5) {
                 m.node.destroy();
                 return false;
             }
@@ -405,14 +480,11 @@ class AdShooterGame extends Component {
     }
 
     private updateGates(dt: number) {
-        const { halfH } = this.layout();
-        const bottomY = -halfH + 20;
         this.gates = this.gates.filter((g) => {
             if (!g.node.isValid) return false;
-            const y = g.node.position.y - g.speed * dt;
-            g.node.setPosition(this.projectXByY(g.worldX, y), y, 0);
-            this.applyPerspectiveScale(g.node, y, 0.5, 1.25);
-            if (y < bottomY) {
+            g.z -= g.speed * dt;
+            this.set3DPosition(g.node, g.centerLane, g.z, this.playY + 1.0);
+            if (g.z < this.playerZ - 3) {
                 g.node.destroy();
                 return false;
             }
@@ -442,7 +514,7 @@ class AdShooterGame extends Component {
             for (let mi = this.monsters.length - 1; mi >= 0; mi--) {
                 const monster = this.monsters[mi];
                 if (!monster.node.isValid) continue;
-                if (!this.aabbOverlap(bullet.node, monster.node)) continue;
+                if (!this.isBulletHitMonster(bullet, monster)) continue;
 
                 monster.hp -= bullet.damage;
                 bullet.node.destroy();
@@ -451,13 +523,10 @@ class AdShooterGame extends Component {
                 if (monster.hp <= 0) {
                     this.score += 10;
                     this.kills += 1;
-                    this.spawnFloatingText(monster.node.position.x, monster.node.position.y + 25, '+10', new Color(255, 225, 120, 255));
+                    this.spawnFloatingText(this.playerUiXByLane(monster.lane), 180, '+10', new Color(255, 225, 120, 255));
                     monster.node.destroy();
                     this.monsters.splice(mi, 1);
                     this.updateHud();
-                } else {
-                    const hpLabel = monster.node.getComponentInChildren(Label);
-                    if (hpLabel) hpLabel.string = `${monster.hp}`;
                 }
                 break;
             }
@@ -465,7 +534,7 @@ class AdShooterGame extends Component {
 
         for (const gate of this.gates) {
             if (gate.used || !gate.node.isValid) continue;
-            if (!this.aabbOverlap(this.player, gate.node)) continue;
+            if (!this.isPlayerHitGate(gate)) continue;
             gate.used = true;
             gate.node.destroy();
             this.applyGate(gate);
@@ -473,7 +542,7 @@ class AdShooterGame extends Component {
 
         for (const monster of this.monsters) {
             if (!monster.node.isValid) continue;
-            if (this.aabbOverlap(this.player, monster.node)) {
+            if (this.isPlayerHitMonster(monster)) {
                 this.triggerGameOver();
                 return;
             }
@@ -481,14 +550,13 @@ class AdShooterGame extends Component {
     }
 
     private applyGate(gate: GateEntity) {
-        const { halfH } = this.layout();
-        const popY = -halfH + 100;
+        const popY = -360;
         if (gate.type === 'mul') {
             this.multiShot = Math.min(9, this.multiShot * gate.value);
-            this.spawnFloatingText(this.player?.position.x ?? 0, popY, `SHOT x${gate.value}`, new Color(120, 220, 255, 255));
+            this.spawnFloatingText(this.playerUiXByLane(this.playerLane), popY, `SHOT x${gate.value}`, new Color(120, 220, 255, 255));
         } else {
             this.bulletDamage += gate.value;
-            this.spawnFloatingText(this.player?.position.x ?? 0, popY, `DMG +${gate.value}`, new Color(180, 255, 130, 255));
+            this.spawnFloatingText(this.playerUiXByLane(this.playerLane), popY, `DMG +${gate.value}`, new Color(180, 255, 130, 255));
         }
         this.score += 15;
         this.updateHud();
@@ -506,7 +574,7 @@ class AdShooterGame extends Component {
 
     private updateHud() {
         if (!this.hudLabel) return;
-        this.hudLabel.string = `Score ${this.score}  Kills ${this.kills}  Lv ${this.level}\nDMG ${this.bulletDamage}  Shot ${this.multiShot}  ASPD ${(1 / this.fireInterval).toFixed(1)}`;
+        this.hudLabel.string = `Score ${this.score}  Kills ${this.kills}  Lv ${this.level}\nDMG ${this.bulletDamage}  Shot ${this.multiShot}  ASPD ${(1 / this.fireInterval).toFixed(1)}  Lane ${this.getPlayerLaneIndex() + 1}/${this.laneCount}`;
     }
 
     private spawnFloatingText(x: number, y: number, text: string, color: Color) {
@@ -538,13 +606,14 @@ class AdShooterGame extends Component {
         this.fireInterval = this.tuning.baseFireInterval;
         this.bulletDamage = 1;
         this.multiShot = 1;
-        this.moveSpeed = 650;
+        this.laneMoveSpeed = 12;
         this.monsterBaseSpeed = this.tuning.baseMonsterSpeed;
         this.phase = 'ready';
+        this.playerLane = (this.laneCount - 1) * 0.5;
+        this.targetLane = this.playerLane;
 
         if (this.player) {
-            const { halfH } = this.layout();
-            this.player.setPosition(0, -halfH + 100, 0);
+            this.set3DPosition(this.player, this.playerLane, this.playerZ, this.playY + 1.0);
         }
         if (this.endLabel) {
             this.endLabel.node.active = false;
@@ -577,6 +646,25 @@ class AdShooterGame extends Component {
         return node;
     }
 
+    private create3DEntityNode(name: string, sx: number, sy: number, sz: number): Node {
+        let node: Node;
+        if (this.cubeTemplate) {
+            node = instantiate(this.cubeTemplate);
+        } else {
+            node = new Node(name);
+        }
+        node.name = name;
+        node.active = true;
+        node.layer = Layers.Enum.DEFAULT;
+        node.setScale(sx, sy, sz);
+        this.world3DRoot?.addChild(node);
+        return node;
+    }
+
+    private set3DPosition(node: Node, lane: number, z: number, y: number) {
+        node.setPosition(this.laneToWorldX(lane), y, z);
+    }
+
     private createLabelNode(name: string, text: string, size: number, color: Color): Label {
         const node = new Node(name);
         node.layer = Layers.Enum.UI_2D;
@@ -589,18 +677,99 @@ class AdShooterGame extends Component {
         return lb;
     }
 
-    private aabbOverlap(a: Node, b: Node): boolean {
-        const ta = a.getComponent(UITransform);
-        const tb = b.getComponent(UITransform);
-        if (!ta || !tb) return false;
-        const ap = a.worldPosition;
-        const bp = b.worldPosition;
-        const aw = ta.contentSize.x * Math.abs(a.worldScale.x);
-        const ah = ta.contentSize.y * Math.abs(a.worldScale.y);
-        const bw = tb.contentSize.x * Math.abs(b.worldScale.x);
-        const bh = tb.contentSize.y * Math.abs(b.worldScale.y);
-        return Math.abs(ap.x - bp.x) * 2 < aw + bw &&
-            Math.abs(ap.y - bp.y) * 2 < ah + bh;
+    private createOrUpdateGridOverlay() {
+        if (!this.worldRoot) return;
+        const { vs, halfH } = this.layout();
+        const topY = halfH - 140;
+        const bottomY = -halfH + 120;
+        const rowHeight = (topY - bottomY) / this.gridRows;
+
+        let overlay = this.worldRoot.getChildByName('GridOverlay');
+        if (!overlay) {
+            overlay = new Node('GridOverlay');
+            overlay.layer = Layers.Enum.UI_2D;
+            overlay.addComponent(UITransform).setContentSize(vs);
+            this.worldRoot.addChild(overlay);
+        }
+        this.gridOverlay = overlay;
+        this.gridOverlay.setSiblingIndex(0);
+        this.gridOverlay.setPosition(0, 0, 0);
+        this.gridOverlay.active = this.showGrid;
+
+        let g = this.gridOverlay.getComponent(Graphics);
+        if (!g) g = this.gridOverlay.addComponent(Graphics);
+        g.clear();
+        g.lineWidth = 2;
+        g.strokeColor = new Color(120, 170, 230, 130);
+
+        // Draw horizontal row lines.
+        for (let r = 0; r <= this.gridRows; r++) {
+            const y = topY - r * rowHeight;
+            const leftX = this.laneToRenderX(-0.5, y);
+            const rightX = this.laneToRenderX(this.laneCount - 0.5, y);
+            g.moveTo(leftX, y);
+            g.lineTo(rightX, y);
+        }
+
+        // Draw vertical lane boundaries (curved by perspective).
+        for (let laneEdge = 0; laneEdge <= this.laneCount; laneEdge++) {
+            const lanePos = laneEdge - 0.5;
+            const startY = topY;
+            const startX = this.laneToRenderX(lanePos, startY);
+            g.moveTo(startX, startY);
+            for (let r = 1; r <= this.gridRows; r++) {
+                const y = topY - r * rowHeight;
+                const x = this.laneToRenderX(lanePos, y);
+                g.lineTo(x, y);
+            }
+        }
+
+        g.stroke();
+    }
+
+    private getPlayerLaneIndex(): number {
+        return Math.max(0, Math.min(this.laneCount - 1, Math.round(this.playerLane)));
+    }
+
+    private uiXToLane(uiX: number): number {
+        const { vs } = this.layout();
+        if (vs.width <= 1) return this.getPlayerLaneIndex();
+        const ratio = Math.max(0, Math.min(0.9999, uiX / vs.width));
+        return this.laneCount - 1 - Math.floor(ratio * this.laneCount);
+    }
+
+    private laneToWorldX(lane: number): number {
+        const centered = (lane + 0.5) - this.laneCount * 0.5;
+        return centered * this.worldLaneWidth;
+    }
+
+    private laneToRenderX(lane: number, y: number): number {
+        return this.projectXByY(this.laneToWorldX(lane), y);
+    }
+
+    private playerUiXByLane(lane: number): number {
+        return this.worldToScreenUi(this.laneToWorldX(lane), this.playerZ).x;
+    }
+
+    private isBulletHitMonster(bullet: BulletEntity, monster: MonsterEntity): boolean {
+        const laneHit = Math.abs(bullet.lane - monster.lane) <= 0.45;
+        const zHit = Math.abs(bullet.z - monster.z) <= 1.2;
+        return laneHit && zHit;
+    }
+
+    private isPlayerHitGate(gate: GateEntity): boolean {
+        if (!this.player) return false;
+        const lane = this.getPlayerLaneIndex();
+        const inLaneRange = lane >= gate.laneStart && lane <= gate.laneEnd;
+        const zHit = Math.abs(this.playerZ - gate.z) <= 1.1;
+        return inLaneRange && zHit;
+    }
+
+    private isPlayerHitMonster(monster: MonsterEntity): boolean {
+        if (!this.player) return false;
+        const laneHit = Math.abs(this.playerLane - monster.lane) <= 0.45;
+        const zHit = Math.abs(this.playerZ - monster.z) <= 1.0;
+        return laneHit && zHit;
     }
 
     private getPerspectiveTByY(y: number): number {
@@ -611,16 +780,34 @@ class AdShooterGame extends Component {
         return Math.max(0, Math.min(1, raw));
     }
 
-    private projectXByY(worldX: number, y: number): number {
+    private depthByY(y: number): number {
         const t = this.getPerspectiveTByY(y);
-        const widthFactor = 0.22 + 0.78 * t; // far narrower, near wider
-        return worldX * widthFactor;
+        return this.farDepth + (this.nearDepth - this.farDepth) * t;
+    }
+
+    private worldToScreenUi(worldX: number, depth: number): Vec3 {
+        const { halfH } = this.layout();
+        const fovDeg = this.projectorCamera?.fov ?? 38;
+        const clampedDepth = Math.max(0.1, depth);
+        const focal = halfH / Math.tan((fovDeg * Math.PI / 180) * 0.5);
+        const x = worldX * focal / clampedDepth;
+        this.tmpScreen.set(x, 0, 0);
+        return this.tmpScreen;
+    }
+
+    private projectXByY(worldX: number, y: number): number {
+        const screen = this.worldToScreenUi(worldX, this.depthByY(y));
+        return screen.x;
     }
 
     private applyPerspectiveScale(node: Node, y: number, farScale: number, nearScale: number) {
-        const t = this.getPerspectiveTByY(y);
-        const curved = t * t;
-        const s = farScale + (nearScale - farScale) * curved;
+        const depth = this.depthByY(y);
+        const nearW = this.worldToScreenUi(this.worldLaneWidth * 0.5, this.nearDepth).x
+            - this.worldToScreenUi(-this.worldLaneWidth * 0.5, this.nearDepth).x;
+        const currW = this.worldToScreenUi(this.worldLaneWidth * 0.5, depth).x
+            - this.worldToScreenUi(-this.worldLaneWidth * 0.5, depth).x;
+        const ratio = nearW === 0 ? 1 : Math.abs(currW / nearW);
+        const s = Math.max(farScale, Math.min(nearScale, nearScale * ratio));
         node.setScale(s, s, 1);
     }
 
@@ -640,7 +827,10 @@ function setupCanvasCamera(scene: Scene) {
     if (!canvasNode || !mainCam) {
         return;
     }
-    mainCam.visibility = mainCam.visibility | Layers.Enum.UI_2D;
+    mainCam.projection = 0;
+    mainCam.clearFlags = 0 as never;
+    mainCam.priority = 10;
+    mainCam.visibility = Layers.Enum.UI_2D;
     const cvs = canvasNode.getComponent(Canvas);
     if (cvs) {
         // 3.8+ Canvas.camera 为只读；序列化字段为 _cameraComponent（与 main.scene 一致）
