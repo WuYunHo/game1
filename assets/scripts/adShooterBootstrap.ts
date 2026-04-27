@@ -26,6 +26,7 @@ import {
     Vec3,
     view,
 } from 'cc';
+import { DoorController } from 'db://assets/scripts/DoorController';
 
 const { ccclass, property } = _decorator;
 
@@ -50,6 +51,7 @@ interface MonsterEntity {
 
 interface GateEntity {
     node: Node;
+    door: DoorController | null;
     type: GateType;
     value: number;
     used: boolean;
@@ -138,7 +140,7 @@ class AdShooterGame extends Component {
     private readonly playY = -2.8;
     private readonly playerZ = 6;
     private readonly monsterSpawnZ = 72;
-    private readonly gateSpawnZ = 58;
+    private readonly gateSpawnZ = 72;
     private readonly bulletSpeed3D = 28;
     private readonly gateSpeed3D = 2;
     private readonly showGrid = false;
@@ -166,6 +168,7 @@ class AdShooterGame extends Component {
     gatePrefabScale = 1;
 
     private readonly tmpScreen = new Vec3();
+    private readonly tmpGateAnchorWorld = new Vec3();
     private player: Node | null = null;
     private hudLabel: Label | null = null;
     private endLabel: Label | null = null;
@@ -203,19 +206,21 @@ class AdShooterGame extends Component {
     private monsterConfigs: MonsterConfig[] = [];
     private monsterPrefabById: Record<string, Prefab | null> = {};
     private monsterClipById: Record<string, AnimationClip | null> = {};
+    private playerPrefab: Prefab | null = null;
+    private playerClip: AnimationClip | null = null;
     private gateConfigs: GateConfig[] = [];
     private bulletConfigs: BulletConfig[] = [];
-    private readonly baseAliveMonsterTarget = 6;
-    private readonly aliveMonsterTargetPerLevel = 1;
-    private readonly maxAliveMonsterTarget = 24;
+    private readonly baseAliveMonsterTarget = 12;
+    private readonly aliveMonsterTargetPerLevel = 2;
+    private readonly maxAliveMonsterTarget = 48;
     private readonly maxSpawnPerFrame = 4;
 
     private tuning: TuningConfig = {
         baseFireInterval: 0.28,
         minFireInterval: 0.08,
-        baseMonsterSpawnInterval: 0.85,
-        minMonsterSpawnInterval: 0.2,
-        gateSpawnInterval: 3,
+        baseMonsterSpawnInterval: 0.425,
+        minMonsterSpawnInterval: 0.1,
+        gateSpawnInterval: 12,
         levelUpIntervalSec: 12,
         baseMonsterSpeed: 6.5,
         monsterSpeedPerLevel: 0.45,
@@ -228,8 +233,11 @@ class AdShooterGame extends Component {
         this.setupPerspectiveProjector(scene);
         this.createSceneNodes();
         this.bindInput();
-        this.loadGameplayConfigs().then(
-            () => this.resetRun(),
+        Promise.all([this.loadGameplayConfigs(), this.preloadPlayerRenderable()]).then(
+            () => {
+                this.createOrReplacePlayerFromAsset();
+                this.resetRun();
+            },
             () => this.resetRun(),
         );
     }
@@ -467,6 +475,12 @@ class AdShooterGame extends Component {
         await Promise.all(tasks);
     }
 
+    private async preloadPlayerRenderable() {
+        const basePath = 'animation/player/player1/player_bfx';
+        this.playerPrefab = await this.loadMonsterRenderablePrefab(basePath);
+        this.playerClip = await this.loadMonsterAnimationClip(basePath);
+    }
+
     private loadPrefab(path: string): Promise<Prefab | null> {
         return new Promise((resolve) => {
             resources.load(path, Prefab, (err, prefab) => {
@@ -560,6 +574,26 @@ class AdShooterGame extends Component {
         this.set3DPosition(this.player, this.playerLane, this.playerZ, this.playY + 1.0);
         this.playerLane = (this.laneCount - 1) * 0.5;
         this.targetLane = this.playerLane;
+    }
+
+    private createOrReplacePlayerFromAsset() {
+        if (!this.world3DRoot || !this.playerPrefab) return;
+        if (this.player?.isValid) {
+            this.player.destroy();
+            this.player = null;
+        }
+
+        const node = instantiate(this.playerPrefab);
+        node.name = 'Player';
+        node.active = true;
+        node.layer = Layers.Enum.DEFAULT;
+        // Player FBX forward is already aligned with gameplay forward.
+        node.setRotationFromEuler(0, 0, 0);
+        node.setScale(2, 2, 2);
+        this.world3DRoot.addChild(node);
+        this.player = node;
+        this.playLoopAnimation(node, this.playerClip);
+        this.set3DPosition(node, this.playerLane, this.playerZ, this.playY + 1.0);
     }
 
     private bindInput() {
@@ -656,6 +690,10 @@ class AdShooterGame extends Component {
 
     private playMonsterLoopAnimation(root: Node, monsterId: string) {
         const fallbackClip = this.monsterClipById[monsterId] ?? null;
+        this.playLoopAnimation(root, fallbackClip);
+    }
+
+    private playLoopAnimation(root: Node, fallbackClip: AnimationClip | null) {
         let played = false;
 
         const skeletalList = root.getComponentsInChildren(SkeletalAnimation);
@@ -729,8 +767,12 @@ class AdShooterGame extends Component {
         const type: GateType = cfg.effectType === 'mulShot' ? 'mul' : 'add';
         const value = cfg.effectValue;
         const node = this.createGateNode();
+        const door = node.getComponent(DoorController);
+        door?.bindUiRoot(this.uiRoot);
+        door?.setGateText(type, value);
         return {
             node,
+            door,
             type,
             value,
             used: false,
@@ -785,10 +827,20 @@ class AdShooterGame extends Component {
 
     private updateGates(dt: number) {
         this.gates = this.gates.filter((g) => {
-            if (!g.node.isValid) return false;
+            if (!g.node.isValid) {
+                g.door?.dispose();
+                return false;
+            }
             g.z -= g.speed * dt;
             this.set3DPosition(g.node, g.centerLane, g.z, this.playY + 1.0);
+            const hasAnchor = g.door?.getAnchorWorldPosition(this.tmpGateAnchorWorld) ?? false;
+            const worldX = hasAnchor ? this.tmpGateAnchorWorld.x : this.laneToWorldX(g.centerLane);
+            const worldY = hasAnchor ? this.tmpGateAnchorWorld.y : (this.playY + 2.2);
+            const worldZ = hasAnchor ? this.tmpGateAnchorWorld.z : g.z;
+            const ui = this.worldToUiByGameCamera(worldX, worldY, worldZ);
+            g.door?.syncLabel(ui.x, ui.y);
             if (g.z < this.playerZ - 3) {
+                g.door?.dispose();
                 g.node.destroy();
                 return false;
             }
@@ -841,6 +893,7 @@ class AdShooterGame extends Component {
             if (gate.used || !gate.node.isValid) continue;
             if (!this.isPlayerHitGate(gate)) continue;
             gate.used = true;
+            gate.door?.dispose();
             gate.node.destroy();
             this.applyGate(gate);
         }
@@ -938,7 +991,10 @@ class AdShooterGame extends Component {
     private clearEntities() {
         for (const b of this.bullets) if (b.node.isValid) b.node.destroy();
         for (const m of this.monsters) if (m.node.isValid) m.node.destroy();
-        for (const g of this.gates) if (g.node.isValid) g.node.destroy();
+        for (const g of this.gates) {
+            g.door?.dispose();
+            if (g.node.isValid) g.node.destroy();
+        }
         for (const f of this.floatingTexts) if (f.node.isValid) f.node.destroy();
         this.bullets = [];
         this.monsters = [];
@@ -1047,6 +1103,25 @@ class AdShooterGame extends Component {
 
     private playerUiXByLane(lane: number): number {
         return this.worldToScreenUi(this.laneToWorldX(lane), this.playerZ).x;
+    }
+
+    private gateUiYByAnchor(worldY: number, z: number): number {
+        const span = Math.max(0.1, this.gateSpawnZ - this.playerZ);
+        const t = Math.max(0, Math.min(1, (this.gateSpawnZ - z) / span));
+        const perspectiveY = 220 - 520 * t;
+        return perspectiveY + (worldY - this.playY) * 28;
+    }
+
+    private worldToUiByGameCamera(worldX: number, worldY: number, worldZ: number): Vec3 {
+        if (this.projectorCamera && this.uiRoot) {
+            this.tmpGateAnchorWorld.set(worldX, worldY, worldZ);
+            this.projectorCamera.convertToUINode(this.tmpGateAnchorWorld, this.uiRoot, this.tmpScreen);
+            return this.tmpScreen;
+        }
+        const uiX = this.worldToScreenUi(worldX, worldZ).x;
+        const uiY = this.gateUiYByAnchor(worldY, worldZ);
+        this.tmpScreen.set(uiX, uiY, 0);
+        return this.tmpScreen;
     }
 
     private isBulletHitMonster(bullet: BulletEntity, monster: MonsterEntity): boolean {
@@ -1174,8 +1249,8 @@ class AdShooterGame extends Component {
                 scaleX: 2.0,
                 scaleY: 2.0,
                 scaleZ: 2.0,
-                hpBase: 4,
-                hpGrowth: 0.8,
+                hpBase: 1,
+                hpGrowth: 0,
                 speedBase: 2,
                 speedRand: 0,
                 hitRadiusLane: 0.45,
