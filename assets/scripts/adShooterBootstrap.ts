@@ -153,6 +153,12 @@ class AdShooterGame extends Component {
     @property(Camera)
     projectorCamera: Camera | null = null;
 
+    @property(Prefab)
+    gatePrefab: Prefab | null = null;
+    
+    @property
+    gatePrefabScale = 1;
+
     private readonly tmpScreen = new Vec3();
     private player: Node | null = null;
     private hudLabel: Label | null = null;
@@ -716,7 +722,7 @@ class AdShooterGame extends Component {
         const laneEnd = laneStart + laneSpan - 1;
         const type: GateType = cfg.effectType === 'mulShot' ? 'mul' : 'add';
         const value = cfg.effectValue;
-        const node = this.create3DEntityNode('Gate', laneSpan * 1.2, cfg.height, cfg.thickness);
+        const node = this.createGateNode();
         return {
             node,
             type,
@@ -728,6 +734,21 @@ class AdShooterGame extends Component {
             centerLane: (laneStart + laneEnd) * 0.5,
             z: this.gateSpawnZ,
         };
+    }
+
+    private createGateNode(): Node {
+        if (this.gatePrefab) {
+            const node = instantiate(this.gatePrefab);
+            node.name = 'Gate';
+            node.active = true;
+            node.layer = Layers.Enum.DEFAULT;
+            const scale = this.gatePrefabScale > 0 ? this.gatePrefabScale : 1;
+            node.setScale(scale, scale, scale);
+            this.world3DRoot?.addChild(node);
+            return node;
+        }
+        const scale = this.gatePrefabScale > 0 ? this.gatePrefabScale : 1;
+        return this.create3DEntityNode('Gate', scale, scale, scale);
     }
 
     private updateBullets(dt: number) {
