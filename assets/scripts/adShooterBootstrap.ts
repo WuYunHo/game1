@@ -132,15 +132,15 @@ class AdShooterGame extends Component {
     private readonly laneCount = 12;
     private readonly gateWidthInLanes = 6;
     private readonly gridCellSize = 10;
-    private readonly worldLaneWidth = 1.6;
-    private readonly farDepth = 42;
+    private readonly worldLaneWidth = 1;
+    private readonly farDepth = 72;
     private readonly nearDepth = 10;
     private readonly playY = -2.8;
     private readonly playerZ = 6;
-    private readonly monsterSpawnZ = 44;
-    private readonly gateSpawnZ = 36;
+    private readonly monsterSpawnZ = 72;
+    private readonly gateSpawnZ = 58;
     private readonly bulletSpeed3D = 28;
-    private readonly gateSpeed3D = 4.2;
+    private readonly gateSpeed3D = 2;
     private readonly showGrid = false;
     private readonly showDebugMarker = false;
     private worldRoot: Node | null = null;
@@ -152,10 +152,16 @@ class AdShooterGame extends Component {
 
     @property(Camera)
     projectorCamera: Camera | null = null;
+    @property
+    cameraHeight = 18;
+    @property
+    cameraDepth = -18;
+    @property
+    cameraLookAtZ = 20;
 
     @property(Prefab)
     gatePrefab: Prefab | null = null;
-    
+
     @property
     gatePrefabScale = 1;
 
@@ -235,8 +241,8 @@ class AdShooterGame extends Component {
                 this.projectorCamera = null;
             } else {
                 this.configureProjectorCamera(this.projectorCamera);
-                this.projectorCamera.node.setPosition(0, 13, -18);
-                this.projectorCamera.node.lookAt(new Vec3(0, 0, 20));
+                this.projectorCamera.node.setPosition(0, this.cameraHeight, this.cameraDepth);
+                this.projectorCamera.node.lookAt(new Vec3(0, 0, this.cameraLookAtZ));
                 return;
             }
         }
@@ -250,8 +256,8 @@ class AdShooterGame extends Component {
             cam = camNode.addComponent(Camera);
         }
         this.configureProjectorCamera(cam);
-        camNode.setPosition(0, 13, -18);
-        camNode.lookAt(new Vec3(0, 0, 20));
+        camNode.setPosition(0, this.cameraHeight, this.cameraDepth);
+        camNode.lookAt(new Vec3(0, 0, this.cameraLookAtZ));
         this.projectorCamera = cam;
     }
 
@@ -1170,8 +1176,8 @@ class AdShooterGame extends Component {
                 scaleZ: 2.0,
                 hpBase: 4,
                 hpGrowth: 0.8,
-                speedBase: 6.2,
-                speedRand: 0.8,
+                speedBase: 2,
+                speedRand: 0,
                 hitRadiusLane: 0.45,
                 hitRadiusZ: 1.2,
                 scoreKill: 10,
@@ -1193,7 +1199,7 @@ class AdShooterGame extends Component {
                 laneSpanMax: 6,
                 height: 1.2,
                 thickness: 1.4,
-                speed: 4.2,
+                speed: 2,
                 spawnWeight: 90,
                 minLevel: 1,
                 maxLevel: 999,
@@ -1207,7 +1213,7 @@ class AdShooterGame extends Component {
                 laneSpanMax: 6,
                 height: 1.2,
                 thickness: 1.4,
-                speed: 4.2,
+                speed: 2,
                 spawnWeight: 75,
                 minLevel: 1,
                 maxLevel: 999,

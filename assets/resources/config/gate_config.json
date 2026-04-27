@@ -8,7 +8,7 @@
     "laneSpanMax": 6,
     "height": 1.2,
     "thickness": 1.4,
-    "speed": 4.2,
+    "speed": 2,
     "spawnWeight": 90,
     "minLevel": 1,
     "maxLevel": 999
@@ -22,7 +22,7 @@
     "laneSpanMax": 6,
     "height": 1.2,
     "thickness": 1.4,
-    "speed": 4.2,
+    "speed": 2,
     "spawnWeight": 75,
     "minLevel": 1,
     "maxLevel": 999
