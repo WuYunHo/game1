@@ -1,0 +1,36 @@
+[
+  {
+    "id": "m_basic_small",
+    "name": "Small",
+    "scaleX": 1.6,
+    "scaleY": 1.6,
+    "scaleZ": 1.6,
+    "hpBase": 2,
+    "hpGrowth": 0.5,
+    "speedBase": 6.4,
+    "speedRand": 0.8,
+    "hitRadiusLane": 0.45,
+    "hitRadiusZ": 1.2,
+    "scoreKill": 10,
+    "spawnWeight": 100,
+    "minLevel": 1,
+    "maxLevel": 999
+  },
+  {
+    "id": "m_tank_big",
+    "name": "Tank",
+    "scaleX": 2.4,
+    "scaleY": 2.4,
+    "scaleZ": 2.4,
+    "hpBase": 6,
+    "hpGrowth": 1.2,
+    "speedBase": 5.3,
+    "speedRand": 0.5,
+    "hitRadiusLane": 0.5,
+    "hitRadiusZ": 1.4,
+    "scoreKill": 18,
+    "spawnWeight": 55,
+    "minLevel": 3,
+    "maxLevel": 999
+  }
+]

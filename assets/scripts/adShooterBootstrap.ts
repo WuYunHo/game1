@@ -11,9 +11,11 @@ import {
     input,
     Input,
     instantiate,
+    JsonAsset,
     Label,
     Layers,
     Node,
+    resources,
     ResolutionPolicy,
     Scene,
     UITransform,
@@ -71,11 +73,61 @@ interface TuningConfig {
     monsterSpeedPerLevel: number;
 }
 
+interface MonsterConfig {
+    id: string;
+    name: string;
+    scaleX: number;
+    scaleY: number;
+    scaleZ: number;
+    hpBase: number;
+    hpGrowth: number;
+    speedBase: number;
+    speedRand: number;
+    hitRadiusLane: number;
+    hitRadiusZ: number;
+    scoreKill: number;
+    spawnWeight: number;
+    minLevel: number;
+    maxLevel: number;
+}
+
+interface GateConfig {
+    id: string;
+    name: string;
+    effectType: 'mulShot' | 'addDamage';
+    effectValue: number;
+    laneSpanMin: number;
+    laneSpanMax: number;
+    height: number;
+    thickness: number;
+    speed: number;
+    spawnWeight: number;
+    minLevel: number;
+    maxLevel: number;
+}
+
+interface BulletConfig {
+    id: string;
+    name: string;
+    scaleX: number;
+    scaleY: number;
+    scaleZ: number;
+    damageBase: number;
+    damageGrowth: number;
+    speed: number;
+    spreadStepLane: number;
+    hitRadiusLane: number;
+    hitRadiusZ: number;
+    fireIntervalBase: number;
+    minFireInterval: number;
+    unlockLevel: number;
+}
+
 @ccclass('AdShooterGame')
 class AdShooterGame extends Component {
     private readonly laneCount = 12;
     private readonly gateWidthInLanes = 6;
-    private readonly gridRows = 40;
+    private readonly gridCellSize = 10;
     private readonly worldLaneWidth = 1.6;
     private readonly farDepth = 42;
     private readonly nearDepth = 10;
@@ -128,6 +180,13 @@ class AdShooterGame extends Component {
     private multiShot = 1;
     private laneMoveSpeed = 12;
     private monsterBaseSpeed = 6.5;
+    private bulletSpreadStepLane = 0.42;
+    private bulletHitRadiusLane = 0.45;
+    private bulletHitRadiusZ = 1.2;
+    private currentBulletConfig: BulletConfig | null = null;
+    private monsterConfigs: MonsterConfig[] = [];
+    private gateConfigs: GateConfig[] = [];
+    private bulletConfigs: BulletConfig[] = [];
 
     private tuning: TuningConfig = {
         baseFireInterval: 0.28,
@@ -147,7 +206,10 @@ class AdShooterGame extends Component {
         this.setupPerspectiveProjector(scene);
         this.createSceneNodes();
         this.bindInput();
-        this.resetRun();
+        this.loadGameplayConfigs().then(
+            () => this.resetRun(),
+            () => this.resetRun(),
+        );
     }
 
     private setupPerspectiveProjector(scene: Scene) {
@@ -340,6 +402,31 @@ class AdShooterGame extends Component {
         }
     }
 
+    private async loadGameplayConfigs() {
+        const [monsterOk, gateOk, bulletOk] = await Promise.all([
+            this.loadJsonConfig<MonsterConfig[]>('config/monster_config'),
+            this.loadJsonConfig<GateConfig[]>('config/gate_config'),
+            this.loadJsonConfig<BulletConfig[]>('config/bullet_config'),
+        ]);
+
+        this.monsterConfigs = monsterOk ?? this.defaultMonsterConfigs();
+        this.gateConfigs = gateOk ?? this.defaultGateConfigs();
+        this.bulletConfigs = bulletOk ?? this.defaultBulletConfigs();
+        this.currentBulletConfig = this.bulletConfigs[0] ?? null;
+    }
+
+    private loadJsonConfig<T>(path: string): Promise<T | null> {
+        return new Promise((resolve) => {
+            resources.load(path, JsonAsset, (err, asset) => {
+                if (err || !asset) {
+                    resolve(null);
+                    return;
+                }
+                resolve(asset.json as T);
+            });
+        });
+    }
+
     private createFallbackPlayer() {
         const existed = this.world3DRoot?.getChildByName('Player') ?? null;
         if (existed) {
@@ -401,24 +488,26 @@ class AdShooterGame extends Component {
 
     private spawnBullets() {
         if (!this.player || !this.world3DRoot) return;
-        const spreadInLane = 0.42;
+        const spreadInLane = this.bulletSpreadStepLane;
         const total = Math.max(1, this.multiShot);
         const startLane = this.playerLane - spreadInLane * (total - 1) * 0.5;
         for (let i = 0; i < total; i++) {
-            const bullet = this.create3DEntityNode('Bullet', 0.35, 0.35, 1.1);
+            const cfg = this.currentBulletConfig;
+            const bullet = this.create3DEntityNode('Bullet', cfg?.scaleX ?? 0.35, cfg?.scaleY ?? 0.35, cfg?.scaleZ ?? 1.1);
             const z = this.playerZ + 1.5;
             const lane = startLane + i * spreadInLane;
             this.set3DPosition(bullet, lane, z, this.playY + 1.2);
-            this.bullets.push({ node: bullet, damage: this.bulletDamage, speed: this.bulletSpeed3D, lane, z });
+            this.bullets.push({ node: bullet, damage: this.bulletDamage, speed: cfg?.speed ?? this.bulletSpeed3D, lane, z });
         }
     }
 
     private spawnMonster() {
         if (!this.world3DRoot) return;
+        const cfg = this.pickWeightedByLevel(this.monsterConfigs, this.level, (x) => x.spawnWeight) ?? this.defaultMonsterConfigs()[0];
         const lane = Math.floor(Math.random() * this.laneCount);
-        const hp = Math.max(1, Math.floor(1 + this.level * 0.45 + Math.random() * this.level * 0.35));
-        const speed = this.monsterBaseSpeed + Math.random() * 0.8;
-        const monster = this.create3DEntityNode('Monster', 2.0, 2.0, 2.0);
+        const hp = Math.max(1, Math.floor(cfg.hpBase + this.level * cfg.hpGrowth));
+        const speed = cfg.speedBase + Math.random() * Math.max(0, cfg.speedRand);
+        const monster = this.create3DEntityNode('Monster', cfg.scaleX, cfg.scaleY, cfg.scaleZ);
         const z = this.monsterSpawnZ;
         this.set3DPosition(monster, lane, z, this.playY + 1.0);
         this.monsters.push({ node: monster, hp, speed, lane, z });
@@ -427,8 +516,8 @@ class AdShooterGame extends Component {
     private spawnGateRow() {
         if (!this.world3DRoot) return;
         const z = this.gateSpawnZ;
-        const leftGate = this.createGate(Math.random() > 0.5 ? 'mul' : 'add', 0, this.gateWidthInLanes - 1);
-        const rightGate = this.createGate(Math.random() > 0.5 ? 'mul' : 'add', this.gateWidthInLanes, this.laneCount - 1);
+        const leftGate = this.createGateInHalf(0, this.gateWidthInLanes - 1);
+        const rightGate = this.createGateInHalf(this.gateWidthInLanes, this.laneCount - 1);
         leftGate.z = z;
         rightGate.z = z;
         this.set3DPosition(leftGate.node, leftGate.centerLane, z, this.playY + 1.0);
@@ -436,16 +525,22 @@ class AdShooterGame extends Component {
         this.gates.push(leftGate, rightGate);
     }
 
-    private createGate(type: GateType, laneStart: number, laneEnd: number): GateEntity {
-        const laneSpan = laneEnd - laneStart + 1;
-        const node = this.create3DEntityNode('Gate', laneSpan * 1.2, 1.2, 1.4);
-        const value = type === 'mul' ? (Math.random() > 0.5 ? 2 : 3) : (Math.random() > 0.5 ? 1 : 2);
+    private createGateInHalf(halfStart: number, halfEnd: number): GateEntity {
+        const cfg = this.pickWeightedByLevel(this.gateConfigs, this.level, (x) => x.spawnWeight) ?? this.defaultGateConfigs()[0];
+        const maxSpanByHalf = halfEnd - halfStart + 1;
+        const laneSpan = Math.max(1, Math.min(maxSpanByHalf, this.randInt(cfg.laneSpanMin, cfg.laneSpanMax)));
+        const localStart = halfStart + Math.floor((maxSpanByHalf - laneSpan) * 0.5);
+        const laneStart = localStart;
+        const laneEnd = laneStart + laneSpan - 1;
+        const type: GateType = cfg.effectType === 'mulShot' ? 'mul' : 'add';
+        const value = cfg.effectValue;
+        const node = this.create3DEntityNode('Gate', laneSpan * 1.2, cfg.height, cfg.thickness);
         return {
             node,
             type,
             value,
             used: false,
-            speed: this.gateSpeed3D,
+            speed: cfg.speed > 0 ? cfg.speed : this.gateSpeed3D,
             laneStart,
             laneEnd,
             centerLane: (laneStart + laneEnd) * 0.5,
@@ -521,7 +616,8 @@ class AdShooterGame extends Component {
                 this.bullets.splice(bi, 1);
 
                 if (monster.hp <= 0) {
-                    this.score += 10;
+                    const cfg = this.monsterConfigForScale(monster.node.scale.x, monster.node.scale.y, monster.node.scale.z);
+                    this.score += cfg?.scoreKill ?? 10;
                     this.kills += 1;
                     this.spawnFloatingText(this.playerUiXByLane(monster.lane), 180, '+10', new Color(255, 225, 120, 255));
                     monster.node.destroy();
@@ -604,10 +700,16 @@ class AdShooterGame extends Component {
         this.gateTimer = 0;
         this.difficultyTimer = 0;
         this.fireInterval = this.tuning.baseFireInterval;
-        this.bulletDamage = 1;
+        this.currentBulletConfig = this.pickBulletConfigForLevel(this.level);
+        this.fireInterval = this.currentBulletConfig?.fireIntervalBase ?? this.tuning.baseFireInterval;
+        this.tuning.minFireInterval = this.currentBulletConfig?.minFireInterval ?? this.tuning.minFireInterval;
+        this.bulletDamage = Math.max(1, Math.floor((this.currentBulletConfig?.damageBase ?? 1) + this.level * (this.currentBulletConfig?.damageGrowth ?? 0)));
         this.multiShot = 1;
         this.laneMoveSpeed = 12;
         this.monsterBaseSpeed = this.tuning.baseMonsterSpeed;
+        this.bulletSpreadStepLane = this.currentBulletConfig?.spreadStepLane ?? 0.42;
+        this.bulletHitRadiusLane = this.currentBulletConfig?.hitRadiusLane ?? 0.45;
+        this.bulletHitRadiusZ = this.currentBulletConfig?.hitRadiusZ ?? 1.2;
         this.phase = 'ready';
         this.playerLane = (this.laneCount - 1) * 0.5;
         this.targetLane = this.playerLane;
@@ -679,10 +781,8 @@ class AdShooterGame extends Component {
 
     private createOrUpdateGridOverlay() {
         if (!this.worldRoot) return;
-        const { vs, halfH } = this.layout();
-        const topY = halfH - 140;
-        const bottomY = -halfH + 120;
-        const rowHeight = (topY - bottomY) / this.gridRows;
+        const { vs, halfW, halfH } = this.layout();
+        const step = this.gridCellSize;
 
         let overlay = this.worldRoot.getChildByName('GridOverlay');
         if (!overlay) {
@@ -699,29 +799,18 @@ class AdShooterGame extends Component {
         let g = this.gridOverlay.getComponent(Graphics);
         if (!g) g = this.gridOverlay.addComponent(Graphics);
         g.clear();
-        g.lineWidth = 2;
+        g.lineWidth = 1;
         g.strokeColor = new Color(120, 170, 230, 130);
 
-        // Draw horizontal row lines.
-        for (let r = 0; r <= this.gridRows; r++) {
-            const y = topY - r * rowHeight;
-            const leftX = this.laneToRenderX(-0.5, y);
-            const rightX = this.laneToRenderX(this.laneCount - 0.5, y);
-            g.moveTo(leftX, y);
-            g.lineTo(rightX, y);
+        // Draw fixed 20x20 cells in UI space.
+        for (let x = -halfW; x <= halfW; x += step) {
+            g.moveTo(x, -halfH);
+            g.lineTo(x, halfH);
         }
 
-        // Draw vertical lane boundaries (curved by perspective).
-        for (let laneEdge = 0; laneEdge <= this.laneCount; laneEdge++) {
-            const lanePos = laneEdge - 0.5;
-            const startY = topY;
-            const startX = this.laneToRenderX(lanePos, startY);
-            g.moveTo(startX, startY);
-            for (let r = 1; r <= this.gridRows; r++) {
-                const y = topY - r * rowHeight;
-                const x = this.laneToRenderX(lanePos, y);
-                g.lineTo(x, y);
-            }
+        for (let y = -halfH; y <= halfH; y += step) {
+            g.moveTo(-halfW, y);
+            g.lineTo(halfW, y);
         }
 
         g.stroke();
@@ -752,8 +841,8 @@ class AdShooterGame extends Component {
     }
 
     private isBulletHitMonster(bullet: BulletEntity, monster: MonsterEntity): boolean {
-        const laneHit = Math.abs(bullet.lane - monster.lane) <= 0.45;
-        const zHit = Math.abs(bullet.z - monster.z) <= 1.2;
+        const laneHit = Math.abs(bullet.lane - monster.lane) <= this.bulletHitRadiusLane;
+        const zHit = Math.abs(bullet.z - monster.z) <= this.bulletHitRadiusZ;
         return laneHit && zHit;
     }
 
@@ -814,6 +903,151 @@ class AdShooterGame extends Component {
     private moveToward(from: number, to: number, delta: number): number {
         if (Math.abs(to - from) <= delta) return to;
         return from + Math.sign(to - from) * delta;
+    }
+
+    private randInt(min: number, max: number): number {
+        const lo = Math.floor(Math.min(min, max));
+        const hi = Math.floor(Math.max(min, max));
+        return lo + Math.floor(Math.random() * (hi - lo + 1));
+    }
+
+    private pickWeightedByLevel<T extends { minLevel: number; maxLevel: number }>(
+        list: T[],
+        level: number,
+        weightFn: (x: T) => number,
+    ): T | null {
+        const candidates = list.filter((x) => level >= x.minLevel && level <= x.maxLevel);
+        if (candidates.length === 0) return null;
+        let total = 0;
+        for (const item of candidates) total += Math.max(0, weightFn(item));
+        if (total <= 0) return candidates[0];
+        let roll = Math.random() * total;
+        for (const item of candidates) {
+            roll -= Math.max(0, weightFn(item));
+            if (roll <= 0) return item;
+        }
+        return candidates[candidates.length - 1];
+    }
+
+    private pickBulletConfigForLevel(level: number): BulletConfig | null {
+        const allowed = this.bulletConfigs.filter((x) => level >= x.unlockLevel);
+        return allowed.length > 0 ? allowed[allowed.length - 1] : this.bulletConfigs[0] ?? null;
+    }
+
+    private monsterConfigForScale(x: number, y: number, z: number): MonsterConfig | null {
+        for (const cfg of this.monsterConfigs) {
+            if (cfg.scaleX === x && cfg.scaleY === y && cfg.scaleZ === z) return cfg;
+        }
+        return null;
+    }
+
+    private defaultMonsterConfigs(): MonsterConfig[] {
+        return [
+            {
+                id: 'm_basic_small',
+                name: 'Small',
+                scaleX: 1.6,
+                scaleY: 1.6,
+                scaleZ: 1.6,
+                hpBase: 2,
+                hpGrowth: 0.5,
+                speedBase: 6.4,
+                speedRand: 0.8,
+                hitRadiusLane: 0.45,
+                hitRadiusZ: 1.2,
+                scoreKill: 10,
+                spawnWeight: 100,
+                minLevel: 1,
+                maxLevel: 999,
+            },
+            {
+                id: 'm_tank_big',
+                name: 'Tank',
+                scaleX: 2.4,
+                scaleY: 2.4,
+                scaleZ: 2.4,
+                hpBase: 6,
+                hpGrowth: 1.2,
+                speedBase: 5.3,
+                speedRand: 0.5,
+                hitRadiusLane: 0.5,
+                hitRadiusZ: 1.4,
+                scoreKill: 18,
+                spawnWeight: 55,
+                minLevel: 3,
+                maxLevel: 999,
+            },
+        ];
+    }
+
+    private defaultGateConfigs(): GateConfig[] {
+        return [
+            {
+                id: 'g_mul_2',
+                name: 'x2 Shot',
+                effectType: 'mulShot',
+                effectValue: 2,
+                laneSpanMin: 3,
+                laneSpanMax: 6,
+                height: 1.2,
+                thickness: 1.4,
+                speed: 4.2,
+                spawnWeight: 90,
+                minLevel: 1,
+                maxLevel: 999,
+            },
+            {
+                id: 'g_add_2',
+                name: '+2 Damage',
+                effectType: 'addDamage',
+                effectValue: 2,
+                laneSpanMin: 2,
+                laneSpanMax: 5,
+                height: 1.2,
+                thickness: 1.4,
+                speed: 4.2,
+                spawnWeight: 75,
+                minLevel: 1,
+                maxLevel: 999,
+            },
+        ];
+    }
+
+    private defaultBulletConfigs(): BulletConfig[] {
+        return [
+            {
+                id: 'b_default',
+                name: 'Default Bullet',
+                scaleX: 0.35,
+                scaleY: 0.35,
+                scaleZ: 1.1,
+                damageBase: 1,
+                damageGrowth: 0.15,
+                speed: 28,
+                spreadStepLane: 0.42,
+                hitRadiusLane: 0.45,
+                hitRadiusZ: 1.2,
+                fireIntervalBase: 0.28,
+                minFireInterval: 0.08,
+                unlockLevel: 1,
+            },
+            {
+                id: 'b_fast',
+                name: 'Fast Bullet',
+                scaleX: 0.28,
+                scaleY: 0.28,
+                scaleZ: 1.2,
+                damageBase: 1,
+                damageGrowth: 0.2,
+                speed: 34,
+                spreadStepLane: 0.38,
+                hitRadiusLane: 0.42,
+                hitRadiusZ: 1.1,
+                fireIntervalBase: 0.24,
+                minFireInterval: 0.07,
+                unlockLevel: 4,
+            },
+        ];
     }
 }
 

@@ -1,0 +1,34 @@
+[
+  {
+    "id": "b_default",
+    "name": "Default Bullet",
+    "scaleX": 0.35,
+    "scaleY": 0.35,
+    "scaleZ": 1.1,
+    "damageBase": 1,
+    "damageGrowth": 0.15,
+    "speed": 28,
+    "spreadStepLane": 0.42,
+    "hitRadiusLane": 0.45,
+    "hitRadiusZ": 1.2,
+    "fireIntervalBase": 0.28,
+    "minFireInterval": 0.08,
+    "unlockLevel": 1
+  },
+  {
+    "id": "b_fast",
+    "name": "Fast Bullet",
+    "scaleX": 0.28,
+    "scaleY": 0.28,
+    "scaleZ": 1.2,
+    "damageBase": 1,
+    "damageGrowth": 0.2,
+    "speed": 34,
+    "spreadStepLane": 0.38,
+    "hitRadiusLane": 0.42,
+    "hitRadiusZ": 1.1,
+    "fireIntervalBase": 0.24,
+    "minFireInterval": 0.07,
+    "unlockLevel": 4
+  }
+]

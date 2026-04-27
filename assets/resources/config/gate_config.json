@@ -1,0 +1,30 @@
+[
+  {
+    "id": "g_mul_2",
+    "name": "x2 Shot",
+    "effectType": "mulShot",
+    "effectValue": 2,
+    "laneSpanMin": 3,
+    "laneSpanMax": 6,
+    "height": 1.2,
+    "thickness": 1.4,
+    "speed": 4.2,
+    "spawnWeight": 90,
+    "minLevel": 1,
+    "maxLevel": 999
+  },
+  {
+    "id": "g_add_2",
+    "name": "+2 Damage",
+    "effectType": "addDamage",
+    "effectValue": 2,
+    "laneSpanMin": 2,
+    "laneSpanMax": 5,
+    "height": 1.2,
+    "thickness": 1.4,
+    "speed": 4.2,
+    "spawnWeight": 75,
+    "minLevel": 1,
+    "maxLevel": 999
+  }
+]
