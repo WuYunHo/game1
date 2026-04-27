@@ -1,4 +1,6 @@
 import {
+    Animation,
+    AnimationClip,
     _decorator,
     Camera,
     Canvas,
@@ -15,9 +17,11 @@ import {
     Label,
     Layers,
     Node,
+    Prefab,
     resources,
     ResolutionPolicy,
     Scene,
+    SkeletalAnimation,
     UITransform,
     Vec3,
     view,
@@ -74,7 +78,7 @@ interface TuningConfig {
 }
 
 interface MonsterConfig {
-    id: string;
+    id: string | number;
     name: string;
     scaleX: number;
     scaleY: number;
@@ -185,8 +189,14 @@ class AdShooterGame extends Component {
     private bulletHitRadiusZ = 1.2;
     private currentBulletConfig: BulletConfig | null = null;
     private monsterConfigs: MonsterConfig[] = [];
+    private monsterPrefabById: Record<string, Prefab | null> = {};
+    private monsterClipById: Record<string, AnimationClip | null> = {};
     private gateConfigs: GateConfig[] = [];
     private bulletConfigs: BulletConfig[] = [];
+    private readonly baseAliveMonsterTarget = 6;
+    private readonly aliveMonsterTargetPerLevel = 1;
+    private readonly maxAliveMonsterTarget = 24;
+    private readonly maxSpawnPerFrame = 4;
 
     private tuning: TuningConfig = {
         baseFireInterval: 0.28,
@@ -286,16 +296,19 @@ class AdShooterGame extends Component {
         this.handleCollisions();
 
         const fireStep = Math.max(this.tuning.minFireInterval, this.fireInterval);
-        if (this.fireTimer >= fireStep) {
-            this.fireTimer = 0;
+        while (this.fireTimer >= fireStep) {
+            this.fireTimer -= fireStep;
             this.spawnBullets();
         }
 
         const spawnStep = Math.max(this.tuning.minMonsterSpawnInterval, this.tuning.baseMonsterSpawnInterval - this.level * 0.02);
-        if (this.monsterTimer >= spawnStep) {
-            this.monsterTimer = 0;
+        let spawnedByTimer = 0;
+        while (this.monsterTimer >= spawnStep && spawnedByTimer < this.maxSpawnPerFrame) {
+            this.monsterTimer -= spawnStep;
             this.spawnMonster();
+            spawnedByTimer++;
         }
+        this.fillMonsterToTarget(spawnedByTimer);
 
         if (this.gateTimer >= this.tuning.gateSpawnInterval) {
             this.gateTimer = 0;
@@ -412,6 +425,7 @@ class AdShooterGame extends Component {
         this.monsterConfigs = monsterOk ?? this.defaultMonsterConfigs();
         this.gateConfigs = gateOk ?? this.defaultGateConfigs();
         this.bulletConfigs = bulletOk ?? this.defaultBulletConfigs();
+        await this.preloadMonsterPrefabs();
         this.currentBulletConfig = this.bulletConfigs[0] ?? null;
     }
 
@@ -425,6 +439,103 @@ class AdShooterGame extends Component {
                 resolve(asset.json as T);
             });
         });
+    }
+
+    private async preloadMonsterPrefabs() {
+        this.monsterPrefabById = {};
+        this.monsterClipById = {};
+        const tasks = this.monsterConfigs.map(async (cfg) => {
+            const key = String(cfg.id);
+            const path = `animation/monster/monster${key}/monster_fbx`;
+            const prefab = await this.loadMonsterRenderablePrefab(path);
+            const clip = await this.loadMonsterAnimationClip(path);
+            this.monsterPrefabById[key] = prefab;
+            this.monsterClipById[key] = clip;
+        });
+        await Promise.all(tasks);
+    }
+
+    private loadPrefab(path: string): Promise<Prefab | null> {
+        return new Promise((resolve) => {
+            resources.load(path, Prefab, (err, prefab) => {
+                if (err || !prefab) {
+                    resolve(null);
+                    return;
+                }
+                resolve(prefab);
+            });
+        });
+    }
+
+    private async loadMonsterRenderablePrefab(basePath: string): Promise<Prefab | null> {
+        const direct = await this.loadPrefab(basePath);
+        if (direct) return direct;
+
+        // FBX import often exposes scene sub-asset as a prefab.
+        for (const subPath of [`${basePath}@6799a`, `${basePath}.fbx@6799a`]) {
+            const prefab = await this.loadPrefab(subPath);
+            if (prefab) return prefab;
+        }
+
+        const byDir = await this.loadFirstPrefabInDir(this.dirname(basePath));
+        if (byDir) return byDir;
+        return null;
+    }
+
+    private loadFirstPrefabInDir(dirPath: string): Promise<Prefab | null> {
+        return new Promise((resolve) => {
+            resources.loadDir(dirPath, Prefab, (err, assets) => {
+                if (err || !assets || assets.length === 0) {
+                    resolve(null);
+                    return;
+                }
+                resolve(assets[0] ?? null);
+            });
+        });
+    }
+
+    private async loadMonsterAnimationClip(basePath: string): Promise<AnimationClip | null> {
+        const direct = await this.loadAnimationClip(basePath);
+        if (direct) return direct;
+
+        for (const subPath of [`${basePath}@58675`, `${basePath}.fbx@58675`]) {
+            const clip = await this.loadAnimationClip(subPath);
+            if (clip) return clip;
+        }
+
+        const byDir = await this.loadFirstAnimationClipInDir(this.dirname(basePath));
+        if (byDir) return byDir;
+        return null;
+    }
+
+    private loadAnimationClip(path: string): Promise<AnimationClip | null> {
+        return new Promise((resolve) => {
+            resources.load(path, AnimationClip, (err, clip) => {
+                if (err || !clip) {
+                    resolve(null);
+                    return;
+                }
+                resolve(clip);
+            });
+        });
+    }
+
+    private loadFirstAnimationClipInDir(dirPath: string): Promise<AnimationClip | null> {
+        return new Promise((resolve) => {
+            resources.loadDir(dirPath, AnimationClip, (err, assets) => {
+                if (err || !assets || assets.length === 0) {
+                    resolve(null);
+                    return;
+                }
+                resolve(assets[0] ?? null);
+            });
+        });
+    }
+
+    private dirname(path: string): string {
+        const idx = path.lastIndexOf('/');
+        if (idx <= 0) return '';
+        return path.slice(0, idx);
     }
 
     private createFallbackPlayer() {
@@ -507,10 +618,81 @@ class AdShooterGame extends Component {
         const lane = Math.floor(Math.random() * this.laneCount);
         const hp = Math.max(1, Math.floor(cfg.hpBase + this.level * cfg.hpGrowth));
         const speed = cfg.speedBase + Math.random() * Math.max(0, cfg.speedRand);
-        const monster = this.create3DEntityNode('Monster', cfg.scaleX, cfg.scaleY, cfg.scaleZ);
+        const monster = this.createMonsterNode(cfg);
         const z = this.monsterSpawnZ;
         this.set3DPosition(monster, lane, z, this.playY + 1.0);
         this.monsters.push({ node: monster, hp, speed, lane, z });
+    }
+
+    private createMonsterNode(cfg: MonsterConfig): Node {
+        const key = String(cfg.id);
+        const prefab = this.monsterPrefabById[key];
+        if (prefab) {
+            const node = instantiate(prefab);
+            node.name = `Monster_${key}`;
+            node.active = true;
+            node.layer = Layers.Enum.DEFAULT;
+            // FBX forward axis often differs from gameplay forward; flip to face player.
+            node.setRotationFromEuler(0, 180, 0);
+            node.setScale(cfg.scaleX, cfg.scaleY, cfg.scaleZ);
+            this.world3DRoot?.addChild(node);
+            this.playMonsterLoopAnimation(node, key);
+            return node;
+        }
+        return this.create3DEntityNode('Monster', cfg.scaleX, cfg.scaleY, cfg.scaleZ);
+    }
+
+    private playMonsterLoopAnimation(root: Node, monsterId: string) {
+        const fallbackClip = this.monsterClipById[monsterId] ?? null;
+        let played = false;
+
+        const skeletalList = root.getComponentsInChildren(SkeletalAnimation);
+        for (const skeletal of skeletalList) {
+            const clip = skeletal.clips[0] ?? fallbackClip;
+            if (!clip) continue;
+            if (skeletal.clips.indexOf(clip) < 0) {
+                skeletal.addClip(clip);
+            }
+            clip.wrapMode = AnimationClip.WrapMode.Loop;
+            skeletal.defaultClip = clip;
+            let state = skeletal.getState(clip.name);
+            if (!state) state = skeletal.createState(clip, clip.name);
+            state.wrapMode = AnimationClip.WrapMode.Loop;
+            state.repeatCount = Infinity;
+            skeletal.play(clip.name);
+            played = true;
+        }
+
+        const animationList = root.getComponentsInChildren(Animation);
+        for (const anim of animationList) {
+            const clip = anim.clips[0] ?? fallbackClip;
+            if (!clip) continue;
+            if (anim.clips.indexOf(clip) < 0) {
+                anim.addClip(clip);
+            }
+            clip.wrapMode = AnimationClip.WrapMode.Loop;
+            anim.defaultClip = clip;
+            let state = anim.getState(clip.name);
+            if (!state) state = anim.createState(clip, clip.name);
+            state.wrapMode = AnimationClip.WrapMode.Loop;
+            state.repeatCount = Infinity;
+            anim.play(clip.name);
+            played = true;
+        }
+
+        if (!played && fallbackClip) {
+            const anim = root.getComponent(Animation) ?? root.addComponent(Animation);
+            if (anim.clips.indexOf(fallbackClip) < 0) {
+                anim.addClip(fallbackClip);
+            }
+            fallbackClip.wrapMode = AnimationClip.WrapMode.Loop;
+            anim.defaultClip = fallbackClip;
+            let state = anim.getState(fallbackClip.name);
+            if (!state) state = anim.createState(fallbackClip, fallbackClip.name);
+            state.wrapMode = AnimationClip.WrapMode.Loop;
+            state.repeatCount = Infinity;
+            anim.play(fallbackClip.name);
+        }
     }
 
     private spawnGateRow() {
@@ -905,6 +1087,22 @@ class AdShooterGame extends Component {
         return from + Math.sign(to - from) * delta;
     }
 
+    private aliveMonsterTarget(): number {
+        const raw = this.baseAliveMonsterTarget + (this.level - 1) * this.aliveMonsterTargetPerLevel;
+        return Math.max(this.baseAliveMonsterTarget, Math.min(this.maxAliveMonsterTarget, raw));
+    }
+
+    private fillMonsterToTarget(spawnedThisFrame: number) {
+        const target = this.aliveMonsterTarget();
+        let need = target - this.monsters.length;
+        let budget = Math.max(0, this.maxSpawnPerFrame - spawnedThisFrame);
+        while (need > 0 && budget > 0) {
+            this.spawnMonster();
+            need--;
+            budget--;
+        }
+    }
+
     private randInt(min: number, max: number): number {
         const lo = Math.floor(Math.min(min, max));
         const hi = Math.floor(Math.max(min, max));
@@ -944,37 +1142,20 @@ class AdShooterGame extends Component {
     private defaultMonsterConfigs(): MonsterConfig[] {
         return [
             {
-                id: 'm_basic_small',
-                name: 'Small',
-                scaleX: 1.6,
-                scaleY: 1.6,
-                scaleZ: 1.6,
-                hpBase: 2,
-                hpGrowth: 0.5,
-                speedBase: 6.4,
+                id: 1,
+                name: 'Default',
+                scaleX: 2.0,
+                scaleY: 2.0,
+                scaleZ: 2.0,
+                hpBase: 4,
+                hpGrowth: 0.8,
+                speedBase: 6.2,
                 speedRand: 0.8,
                 hitRadiusLane: 0.45,
                 hitRadiusZ: 1.2,
                 scoreKill: 10,
                 spawnWeight: 100,
                 minLevel: 1,
-                maxLevel: 999,
-            },
-            {
-                id: 'm_tank_big',
-                name: 'Tank',
-                scaleX: 2.4,
-                scaleY: 2.4,
-                scaleZ: 2.4,
-                hpBase: 6,
-                hpGrowth: 1.2,
-                speedBase: 5.3,
-                speedRand: 0.5,
-                hitRadiusLane: 0.5,
-                hitRadiusZ: 1.4,
-                scoreKill: 18,
-                spawnWeight: 55,
-                minLevel: 3,
                 maxLevel: 999,
             },
         ];
@@ -987,7 +1168,7 @@ class AdShooterGame extends Component {
                 name: 'x2 Shot',
                 effectType: 'mulShot',
                 effectValue: 2,
-                laneSpanMin: 3,
+                laneSpanMin: 6,
                 laneSpanMax: 6,
                 height: 1.2,
                 thickness: 1.4,
@@ -1001,8 +1182,8 @@ class AdShooterGame extends Component {
                 name: '+2 Damage',
                 effectType: 'addDamage',
                 effectValue: 2,
-                laneSpanMin: 2,
-                laneSpanMax: 5,
+                laneSpanMin: 6,
+                laneSpanMax: 6,
                 height: 1.2,
                 thickness: 1.4,
                 speed: 4.2,
