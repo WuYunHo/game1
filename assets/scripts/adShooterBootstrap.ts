@@ -549,7 +549,6 @@ class AdShooterGame extends Component {
         if (mat) {
             // Different Cocos versions/effects may expose different uniform names.
             mat.setProperty('tilingOffset', this.tmpRoadTiling);
-            mat.setProperty('mainTiling_Offset', this.tmpRoadTiling);
         }
     }
 
