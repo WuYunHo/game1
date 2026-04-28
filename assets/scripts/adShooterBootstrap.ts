@@ -16,6 +16,8 @@ import {
     JsonAsset,
     Label,
     Layers,
+    Material,
+    MeshRenderer,
     Node,
     Prefab,
     resources,
@@ -24,6 +26,7 @@ import {
     SkeletalAnimation,
     UITransform,
     Vec3,
+    Vec4,
     view,
 } from 'cc';
 import { DoorController } from 'db://assets/scripts/DoorController';
@@ -167,8 +170,14 @@ class AdShooterGame extends Component {
     @property
     gatePrefabScale = 1;
 
+    @property(Node)
+    roadSurface: Node | null = null;
+    @property
+    roadSpeed = 16;
+
     private readonly tmpScreen = new Vec3();
     private readonly tmpGateAnchorWorld = new Vec3();
+    private readonly tmpRoadTiling = new Vec4();
     private player: Node | null = null;
     private hudLabel: Label | null = null;
     private endLabel: Label | null = null;
@@ -180,6 +189,9 @@ class AdShooterGame extends Component {
     private monsters: MonsterEntity[] = [];
     private gates: GateEntity[] = [];
     private floatingTexts: FloatingTextEntity[] = [];
+    private roadRenderer: MeshRenderer | null = null;
+    private roadMaterialInstance: Material | null = null;
+    private roadUvOffsetY = 0;
 
     private fireTimer = 0;
     private monsterTimer = 0;
@@ -232,6 +244,7 @@ class AdShooterGame extends Component {
         setupCanvasCamera(scene);
         this.setupPerspectiveProjector(scene);
         this.createSceneNodes();
+        this.setupRoadLoop();
         this.bindInput();
         Promise.all([this.loadGameplayConfigs(), this.preloadPlayerRenderable()]).then(
             () => {
@@ -301,6 +314,7 @@ class AdShooterGame extends Component {
     }
 
     update(dt: number) {
+        this.updateRoadLoop(dt);
         if (this.phase !== 'playing' || this.gameOver) return;
 
         this.difficultyTimer += dt;
@@ -433,6 +447,42 @@ class AdShooterGame extends Component {
             this.debugMarker = this.create3DEntityNode('DebugMarker', 4, 4, 4);
             this.debugMarker.setPosition(0, 2.5, 20);
         }
+    }
+
+    private setupRoadLoop() {
+        if (!this.roadSurface || !this.roadSurface.isValid) {
+            this.roadSurface = this.findRoadSurfaceFallback();
+        }
+        this.roadRenderer = this.roadSurface?.getComponent(MeshRenderer) ?? null;
+        this.roadMaterialInstance = null;
+        if (this.roadRenderer) {
+            const shared = this.roadRenderer.getSharedMaterial(0) ?? this.roadRenderer.getMaterial(0);
+            if (shared) {
+                const instanced = new Material();
+                instanced.copy(shared);
+                this.roadRenderer.setMaterial(instanced, 0);
+                this.roadMaterialInstance = instanced;
+            }
+        }
+        this.roadUvOffsetY = 0;
+    }
+
+    private updateRoadLoop(dt: number) {
+        const speed = Math.max(0, this.roadSpeed);
+        this.roadUvOffsetY = (this.roadUvOffsetY + speed * dt * 0.05) % 1;
+        this.tmpRoadTiling.set(1, 1, 0, this.roadUvOffsetY);
+        const mat = this.roadMaterialInstance ?? this.roadRenderer?.getMaterialInstance(0) ?? this.roadRenderer?.getMaterial(0) ?? null;
+        if (mat) {
+            // Different Cocos versions/effects may expose different uniform names.
+            mat.setProperty('tilingOffset', this.tmpRoadTiling);
+            mat.setProperty('mainTiling_Offset', this.tmpRoadTiling);
+        }
+    }
+
+    private findRoadSurfaceFallback(): Node | null {
+        const inWorld = this.world3DRoot?.getChildByName('Road') ?? null;
+        if (inWorld) return inWorld;
+        return this.world3DRoot?.getChildByName('roadBase') ?? null;
     }
 
     private async loadGameplayConfigs() {
