@@ -32,13 +32,13 @@
         "__id__": 21
       },
       {
-        "__id__": 38
+        "__id__": 40
       }
     ],
     "_active": true,
     "_components": [],
     "_prefab": {
-      "__id__": 49
+      "__id__": 51
     },
     "_lpos": {
       "__type__": "cc.Vec3",
@@ -69,7 +69,7 @@
     },
     "autoReleaseAssets": false,
     "_globals": {
-      "__id__": 53
+      "__id__": 55
     },
     "_id": "7c3e7fab-7b1e-4865-ba84-3cf81b48b9fb"
   },
@@ -525,7 +525,7 @@
       "__type__": "cc.Vec3",
       "x": 1.26,
       "y": 0.2,
-      "z": 10
+      "z": 15
     }
   },
   {
@@ -615,6 +615,12 @@
       },
       {
         "__id__": 37
+      },
+      {
+        "__id__": 38
+      },
+      {
+        "__id__": 39
       }
     ],
     "removedComponents": []
@@ -775,6 +781,26 @@
     "value": 0.5
   },
   {
+    "__type__": "CCPropertyOverrideInfo",
+    "targetInfo": {
+      "__id__": 30
+    },
+    "propertyPath": [
+      "skylineParallax"
+    ],
+    "value": 5
+  },
+  {
+    "__type__": "CCPropertyOverrideInfo",
+    "targetInfo": {
+      "__id__": 30
+    },
+    "propertyPath": [
+      "skylineCountPerSide"
+    ],
+    "value": 20
+  },
+  {
     "__type__": "cc.Node",
     "_name": "Canvas",
     "_objFlags": 0,
@@ -784,16 +810,16 @@
     },
     "_children": [
       {
-        "__id__": 39
+        "__id__": 41
       }
     ],
     "_active": true,
     "_components": [
       {
-        "__id__": 47
+        "__id__": 49
       },
       {
-        "__id__": 48
+        "__id__": 50
       }
     ],
     "_prefab": null,
@@ -830,17 +856,17 @@
     "__type__": "cc.Node",
     "_objFlags": 0,
     "_parent": {
-      "__id__": 38
+      "__id__": 40
     },
     "_prefab": {
-      "__id__": 40
+      "__id__": 42
     },
     "__editorExtras__": {}
   },
   {
     "__type__": "cc.PrefabInfo",
     "root": {
-      "__id__": 39
+      "__id__": 41
     },
     "asset": {
       "__uuid__": "a784249d-1074-487f-aa0f-a3b33808eff1",
@@ -848,7 +874,7 @@
     },
     "fileId": "c46/YsCPVOJYA4mWEpNYRx",
     "instance": {
-      "__id__": 41
+      "__id__": 43
     },
     "targetOverrides": null,
     "nestedPrefabInstanceRoots": null
@@ -861,16 +887,16 @@
     "mountedComponents": [],
     "propertyOverrides": [
       {
-        "__id__": 42
-      },
-      {
         "__id__": 44
       },
       {
-        "__id__": 45
+        "__id__": 46
       },
       {
-        "__id__": 46
+        "__id__": 47
+      },
+      {
+        "__id__": 48
       }
     ],
     "removedComponents": []
@@ -878,7 +904,7 @@
   {
     "__type__": "CCPropertyOverrideInfo",
     "targetInfo": {
-      "__id__": 43
+      "__id__": 45
     },
     "propertyPath": [
       "_name"
@@ -894,7 +920,7 @@
   {
     "__type__": "CCPropertyOverrideInfo",
     "targetInfo": {
-      "__id__": 43
+      "__id__": 45
     },
     "propertyPath": [
       "_lpos"
@@ -909,7 +935,7 @@
   {
     "__type__": "CCPropertyOverrideInfo",
     "targetInfo": {
-      "__id__": 43
+      "__id__": 45
     },
     "propertyPath": [
       "_lrot"
@@ -925,7 +951,7 @@
   {
     "__type__": "CCPropertyOverrideInfo",
     "targetInfo": {
-      "__id__": 43
+      "__id__": 45
     },
     "propertyPath": [
       "_euler"
@@ -943,7 +969,7 @@
     "_objFlags": 0,
     "__editorExtras__": {},
     "node": {
-      "__id__": 38
+      "__id__": 40
     },
     "_enabled": true,
     "__prefab": null,
@@ -959,7 +985,7 @@
     "_objFlags": 0,
     "__editorExtras__": {},
     "node": {
-      "__id__": 38
+      "__id__": 40
     },
     "_enabled": true,
     "__prefab": null,
@@ -983,7 +1009,7 @@
     "instance": null,
     "targetOverrides": [
       {
-        "__id__": 50
+        "__id__": 52
       }
     ],
     "nestedPrefabInstanceRoots": [
@@ -994,7 +1020,7 @@
         "__id__": 21
       },
       {
-        "__id__": 39
+        "__id__": 41
       }
     ]
   },
@@ -1004,7 +1030,7 @@
       "__id__": 21
     },
     "sourceInfo": {
-      "__id__": 51
+      "__id__": 53
     },
     "propertyPath": [
       "roadSurface"
@@ -1013,7 +1039,7 @@
       "__id__": 10
     },
     "targetInfo": {
-      "__id__": 52
+      "__id__": 54
     }
   },
   {
@@ -1031,28 +1057,28 @@
   {
     "__type__": "cc.SceneGlobals",
     "ambient": {
-      "__id__": 54
-    },
-    "shadows": {
-      "__id__": 55
-    },
-    "_skybox": {
       "__id__": 56
     },
-    "fog": {
+    "shadows": {
       "__id__": 57
     },
-    "octree": {
+    "_skybox": {
       "__id__": 58
     },
-    "skin": {
+    "fog": {
       "__id__": 59
     },
-    "lightProbeInfo": {
+    "octree": {
       "__id__": 60
     },
-    "postSettings": {
+    "skin": {
       "__id__": 61
+    },
+    "lightProbeInfo": {
+      "__id__": 62
+    },
+    "postSettings": {
+      "__id__": 63
     },
     "bakedWithStationaryMainLight": false,
     "bakedWithHighpLightmap": false

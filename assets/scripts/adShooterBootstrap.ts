@@ -71,6 +71,12 @@ interface FloatingTextEntity {
     speed: number;
 }
 
+interface SkylineEntity {
+    node: Node;
+    x: number;
+    z: number;
+}
+
 interface TuningConfig {
     baseFireInterval: number;
     minFireInterval: number;
@@ -174,6 +180,12 @@ class AdShooterGame extends Component {
     roadSurface: Node | null = null;
     @property
     roadSpeed = 16;
+    @property
+    skylineEnabled = true;
+    @property
+    skylineParallax = 0.32;
+    @property
+    skylineCountPerSide = 8;
 
     private readonly tmpScreen = new Vec3();
     private readonly tmpGateAnchorWorld = new Vec3();
@@ -189,6 +201,7 @@ class AdShooterGame extends Component {
     private monsters: MonsterEntity[] = [];
     private gates: GateEntity[] = [];
     private floatingTexts: FloatingTextEntity[] = [];
+    private skylineEntities: SkylineEntity[] = [];
     private roadRenderer: MeshRenderer | null = null;
     private roadMaterialInstance: Material | null = null;
     private roadUvOffsetY = 0;
@@ -315,6 +328,7 @@ class AdShooterGame extends Component {
 
     update(dt: number) {
         this.updateRoadLoop(dt);
+        this.updateSkyline(dt);
         if (this.phase !== 'playing' || this.gameOver) return;
 
         this.difficultyTimer += dt;
@@ -446,6 +460,66 @@ class AdShooterGame extends Component {
             }
             this.debugMarker = this.create3DEntityNode('DebugMarker', 4, 4, 4);
             this.debugMarker.setPosition(0, 2.5, 20);
+        }
+        this.setupSkyline();
+    }
+
+    private setupSkyline() {
+        for (const skyline of this.skylineEntities) {
+            if (skyline.node.isValid) skyline.node.destroy();
+        }
+        this.skylineEntities = [];
+        if (!this.skylineEnabled || !this.world3DRoot) return;
+
+        const count = Math.max(4, Math.floor(this.skylineCountPerSide));
+        const nearZ = this.playerZ - 8;
+        const farZ = this.monsterSpawnZ + 12;
+        const spanZ = farZ - nearZ;
+        const leftBaseX = -7.6;
+        const rightBaseX = 7.6;
+
+        for (let i = 0; i < count; i++) {
+            const t = count <= 1 ? 0 : i / (count - 1);
+            const baseZ = nearZ + spanZ * t;
+            this.createSkylineBlock(leftBaseX, baseZ);
+            this.createSkylineBlock(rightBaseX, baseZ);
+        }
+    }
+
+    private createSkylineBlock(sideBaseX: number, z: number) {
+        const sx = 1.6 + Math.random() * 1.8;
+        const sy = 4.0 + Math.random() * 7.0;
+        const sz = 1.8 + Math.random() * 2.8;
+        const xJitter = (Math.random() - 0.5) * 1.1;
+        const zJitter = (Math.random() - 0.5) * 5.5;
+        const x = sideBaseX + xJitter;
+        const node = this.create3DEntityNode('SkylineBlock', sx, sy, sz);
+        const y = this.playY + sy * 0.5;
+        const finalZ = z + zJitter;
+        node.setPosition(x, y, finalZ);
+        this.skylineEntities.push({ node, x, z: finalZ });
+    }
+
+    private updateSkyline(dt: number) {
+        if (!this.skylineEnabled || this.skylineEntities.length === 0) return;
+        const speed = Math.max(0, this.roadSpeed * this.skylineParallax);
+        const nearZ = this.playerZ - 12;
+        const spacing = 4.5;
+
+        let maxZ = Number.NEGATIVE_INFINITY;
+        for (const skyline of this.skylineEntities) {
+            if (!skyline.node.isValid) continue;
+            if (skyline.z > maxZ) maxZ = skyline.z;
+        }
+
+        for (const skyline of this.skylineEntities) {
+            if (!skyline.node.isValid) continue;
+            skyline.z -= speed * dt;
+            if (skyline.z < nearZ) {
+                skyline.z = maxZ + spacing;
+                maxZ = skyline.z;
+            }
+            skyline.node.setPosition(skyline.x, skyline.node.position.y, skyline.z);
         }
     }
 
