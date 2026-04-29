@@ -163,12 +163,6 @@ class AdShooterGame extends Component {
 
     @property(Camera)
     projectorCamera: Camera | null = null;
-    @property
-    cameraHeight = 18;
-    @property
-    cameraDepth = -18;
-    @property
-    cameraLookAtZ = 20;
 
     @property(Prefab)
     gatePrefab: Prefab | null = null;
@@ -274,9 +268,6 @@ class AdShooterGame extends Component {
             if (mainCam && this.projectorCamera === mainCam) {
                 this.projectorCamera = null;
             } else {
-                this.configureProjectorCamera(this.projectorCamera);
-                this.projectorCamera.node.setPosition(0, this.cameraHeight, this.cameraDepth);
-                this.projectorCamera.node.lookAt(new Vec3(0, 0, this.cameraLookAtZ));
                 return;
             }
         }
@@ -289,22 +280,7 @@ class AdShooterGame extends Component {
         if (!cam) {
             cam = camNode.addComponent(Camera);
         }
-        this.configureProjectorCamera(cam);
-        camNode.setPosition(0, this.cameraHeight, this.cameraDepth);
-        camNode.lookAt(new Vec3(0, 0, this.cameraLookAtZ));
         this.projectorCamera = cam;
-    }
-
-    private configureProjectorCamera(cam: Camera) {
-        cam.projection = 1;
-        cam.fov = 45;
-        cam.near = 0.1;
-        cam.far = 2000;
-        // Real 3D rendering camera for gameplay entities.
-        cam.visibility = 0xffffffff;
-        cam.clearFlags = 14 as never;
-        cam.priority = 0;
-        (cam as unknown as { clearColor: Color }).clearColor = new Color(20, 28, 46, 255);
     }
 
     private applyPortraitLayout() {
