@@ -147,7 +147,8 @@ class AdShooterGame extends Component {
     private readonly farDepth = 72;
     private readonly nearDepth = 10;
     private readonly playY = -2.8;
-    private readonly playerZ = 6;
+    @property
+    playerZ = 4.5;
     private readonly monsterSpawnZ = 72;
     private readonly gateSpawnZ = 72;
     private readonly bulletSpeed3D = 28;
@@ -468,7 +469,11 @@ class AdShooterGame extends Component {
         const sz = 1.8 + Math.random() * 2.8;
         const xJitter = (Math.random() - 0.5) * 1.1;
         const zJitter = (Math.random() - 0.5) * 5.5;
-        const x = sideBaseX + xJitter;
+        const sign = sideBaseX >= 0 ? 1 : -1;
+        const roadHalfWidth = this.laneCount * this.worldLaneWidth * 0.5;
+        const roadEdgePadding = 0.6;
+        const minAbsX = roadHalfWidth + sx * 0.5 + roadEdgePadding;
+        const x = sign * Math.max(minAbsX, Math.abs(sideBaseX + xJitter));
         const node = this.create3DEntityNode('SkylineBlock', sx, sy, sz);
         const y = this.playY + sy * 0.5;
         const finalZ = z + zJitter;
