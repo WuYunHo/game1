@@ -81,6 +81,7 @@ interface SidewalkEntity {
     node: Node;
     x: number;
     z: number;
+    laneKey: string;
 }
 
 interface TuningConfig {
@@ -197,6 +198,8 @@ class AdShooterGame extends Component {
     sideWalkRoadGap = 0.6;
     @property
     sideWalkCountPerSide = 18;
+    @property
+    sideWalkColumnsPerSide = 2;
     @property
     sideWalkParallax = 1.0;
 
@@ -534,17 +537,20 @@ class AdShooterGame extends Component {
         if (!this.sideWalkEnabled || !this.world3DRoot) return;
 
         const count = Math.max(6, Math.floor(this.sideWalkCountPerSide));
+        const columns = Math.max(1, Math.floor(this.sideWalkColumnsPerSide));
         const tileLen = 3.0; // SideWalk prefab is a 3x3 plane.
+        const tileWidth = 3.0;
         const nearZ = this.playerZ - 10;
         const roadHalfWidth = this.laneCount * this.worldLaneWidth * 0.5;
         const baseOffset = roadHalfWidth + 1.5 + Math.max(0, this.sideWalkRoadGap); // sidewalk plane is 3x3
-        const leftBaseX = -baseOffset;
-        const rightBaseX = baseOffset;
 
         for (let i = 0; i < count; i++) {
             const baseZ = nearZ + i * tileLen;
-            this.createSideWalkTile(leftBaseX, baseZ);
-            this.createSideWalkTile(rightBaseX, baseZ);
+            for (let col = 0; col < columns; col++) {
+                const offset = baseOffset + col * tileWidth;
+                this.createSideWalkTile(-offset, baseZ);
+                this.createSideWalkTile(offset, baseZ);
+            }
         }
     }
 
@@ -562,7 +568,7 @@ class AdShooterGame extends Component {
         const y = this.playY + 0.03;
         node.setPosition(finalX, y, z);
         this.applyShadowFlags(node, false, true);
-        this.sideWalkEntities.push({ node, x: finalX, z });
+        this.sideWalkEntities.push({ node, x: finalX, z, laneKey: finalX.toFixed(3) });
     }
 
     private updateSideWalks(dt: number) {
@@ -571,29 +577,20 @@ class AdShooterGame extends Component {
         const tileLen = 3.0; // SideWalk prefab is a 3x3 plane.
         const nearZ = this.playerZ - 12;
         const spacing = tileLen;
-
-        let maxLeftZ = Number.NEGATIVE_INFINITY;
-        let maxRightZ = Number.NEGATIVE_INFINITY;
+        const laneMaxZ = new Map<string, number>();
         for (const sideWalk of this.sideWalkEntities) {
             if (!sideWalk.node.isValid) continue;
-            if (sideWalk.x < 0) {
-                if (sideWalk.z > maxLeftZ) maxLeftZ = sideWalk.z;
-            } else {
-                if (sideWalk.z > maxRightZ) maxRightZ = sideWalk.z;
-            }
+            const curr = laneMaxZ.get(sideWalk.laneKey);
+            if (curr === undefined || sideWalk.z > curr) laneMaxZ.set(sideWalk.laneKey, sideWalk.z);
         }
 
         for (const sideWalk of this.sideWalkEntities) {
             if (!sideWalk.node.isValid) continue;
             sideWalk.z -= speed * dt;
             if (sideWalk.z < nearZ) {
-                if (sideWalk.x < 0) {
-                    sideWalk.z = maxLeftZ + spacing;
-                    maxLeftZ = sideWalk.z;
-                } else {
-                    sideWalk.z = maxRightZ + spacing;
-                    maxRightZ = sideWalk.z;
-                }
+                const laneZ = laneMaxZ.get(sideWalk.laneKey) ?? nearZ;
+                sideWalk.z = laneZ + spacing;
+                laneMaxZ.set(sideWalk.laneKey, sideWalk.z);
             }
             sideWalk.node.setPosition(sideWalk.x, sideWalk.node.position.y, sideWalk.z);
         }
