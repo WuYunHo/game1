@@ -250,6 +250,8 @@ class AdShooterGame extends Component {
     private monsterClipById: Record<string, AnimationClip | null> = {};
     private playerPrefab: Prefab | null = null;
     private playerClip: AnimationClip | null = null;
+    private bulletPrefab: Prefab | null = null;
+    private bulletClip: AnimationClip | null = null;
     private gateConfigs: GateConfig[] = [];
     private bulletConfigs: BulletConfig[] = [];
     private readonly baseAliveMonsterTarget = 12;
@@ -276,7 +278,7 @@ class AdShooterGame extends Component {
         this.createSceneNodes();
         this.setupRoadLoop();
         this.bindInput();
-        Promise.all([this.loadGameplayConfigs(), this.preloadPlayerRenderable()]).then(
+        Promise.all([this.loadGameplayConfigs(), this.preloadPlayerRenderable(), this.preloadBulletRenderable()]).then(
             () => {
                 this.createOrReplacePlayerFromAsset();
                 this.resetRun();
@@ -680,6 +682,12 @@ class AdShooterGame extends Component {
         this.playerClip = await this.loadMonsterAnimationClip(basePath);
     }
 
+    private async preloadBulletRenderable() {
+        const basePath = 'animation/bullet/bullet1/bullet_bfx';
+        this.bulletPrefab = await this.loadMonsterRenderablePrefab(basePath);
+        this.bulletClip = await this.loadMonsterAnimationClip(basePath);
+    }
+
     private loadPrefab(path: string): Promise<Prefab | null> {
         return new Promise((resolve) => {
             resources.load(path, Prefab, (err, prefab) => {
@@ -850,12 +858,28 @@ class AdShooterGame extends Component {
         const startLane = this.playerLane - spreadInLane * (total - 1) * 0.5;
         for (let i = 0; i < total; i++) {
             const cfg = this.currentBulletConfig;
-            const bullet = this.create3DEntityNode('Bullet', cfg?.scaleX ?? 0.35, cfg?.scaleY ?? 0.35, cfg?.scaleZ ?? 1.1);
+            const bullet = this.createBulletNode(cfg);
             const z = this.playerZ + 1.5;
             const lane = startLane + i * spreadInLane;
             this.set3DPosition(bullet, lane, z, this.playY + 1.2);
             this.bullets.push({ node: bullet, damage: this.bulletDamage, speed: cfg?.speed ?? this.bulletSpeed3D, lane, z });
         }
+    }
+
+    private createBulletNode(cfg: BulletConfig | null): Node {
+        if (this.world3DRoot && this.bulletPrefab) {
+            const node = instantiate(this.bulletPrefab);
+            node.name = 'Bullet';
+            node.active = true;
+            node.layer = Layers.Enum.DEFAULT;
+            node.setRotationFromEuler(0, 0, 0);
+            node.setScale(cfg?.scaleX ?? 0.35, cfg?.scaleY ?? 0.35, cfg?.scaleZ ?? 1.1);
+            this.world3DRoot.addChild(node);
+            this.applyShadowFlags(node, false, false);
+            this.playLoopAnimation(node, this.bulletClip);
+            return node;
+        }
+        return this.create3DEntityNode('Bullet', cfg?.scaleX ?? 0.35, cfg?.scaleY ?? 0.35, cfg?.scaleZ ?? 1.1);
     }
 
     private spawnMonster() {
