@@ -77,6 +77,12 @@ interface SkylineEntity {
     z: number;
 }
 
+interface SidewalkEntity {
+    node: Node;
+    x: number;
+    z: number;
+}
+
 interface TuningConfig {
     baseFireInterval: number;
     minFireInterval: number;
@@ -181,6 +187,18 @@ class AdShooterGame extends Component {
     skylineParallax = 0.32;
     @property
     skylineCountPerSide = 8;
+    @property
+    skylineRoadGap = 1.2;
+    @property(Prefab)
+    sideWalkPrefab: Prefab | null = null;
+    @property
+    sideWalkEnabled = true;
+    @property
+    sideWalkRoadGap = 0.6;
+    @property
+    sideWalkCountPerSide = 18;
+    @property
+    sideWalkParallax = 1.0;
 
     private readonly tmpScreen = new Vec3();
     private readonly tmpGateAnchorWorld = new Vec3();
@@ -197,6 +215,7 @@ class AdShooterGame extends Component {
     private gates: GateEntity[] = [];
     private floatingTexts: FloatingTextEntity[] = [];
     private skylineEntities: SkylineEntity[] = [];
+    private sideWalkEntities: SidewalkEntity[] = [];
     private roadRenderer: MeshRenderer | null = null;
     private roadMaterialInstance: Material | null = null;
     private roadUvOffsetY = 0;
@@ -306,6 +325,7 @@ class AdShooterGame extends Component {
     update(dt: number) {
         this.updateRoadLoop(dt);
         this.updateSkyline(dt);
+        this.updateSideWalks(dt);
         if (this.phase !== 'playing' || this.gameOver) return;
 
         this.difficultyTimer += dt;
@@ -439,6 +459,7 @@ class AdShooterGame extends Component {
             this.debugMarker.setPosition(0, 2.5, 20);
         }
         this.setupSkyline();
+        this.setupSideWalks();
     }
 
     private setupSkyline() {
@@ -452,8 +473,10 @@ class AdShooterGame extends Component {
         const nearZ = this.playerZ - 8;
         const farZ = this.monsterSpawnZ + 12;
         const spanZ = farZ - nearZ;
-        const leftBaseX = -7.6;
-        const rightBaseX = 7.6;
+        const roadHalfWidth = this.laneCount * this.worldLaneWidth * 0.5;
+        const baseOffset = roadHalfWidth + Math.max(0, this.skylineRoadGap);
+        const leftBaseX = -baseOffset;
+        const rightBaseX = baseOffset;
 
         for (let i = 0; i < count; i++) {
             const t = count <= 1 ? 0 : i / (count - 1);
@@ -471,8 +494,7 @@ class AdShooterGame extends Component {
         const zJitter = (Math.random() - 0.5) * 5.5;
         const sign = sideBaseX >= 0 ? 1 : -1;
         const roadHalfWidth = this.laneCount * this.worldLaneWidth * 0.5;
-        const roadEdgePadding = 0.6;
-        const minAbsX = roadHalfWidth + sx * 0.5 + roadEdgePadding;
+        const minAbsX = roadHalfWidth + sx * 0.5 + Math.max(0, this.skylineRoadGap);
         const x = sign * Math.max(minAbsX, Math.abs(sideBaseX + xJitter));
         const node = this.create3DEntityNode('SkylineBlock', sx, sy, sz);
         const y = this.playY + sy * 0.5;
@@ -501,6 +523,79 @@ class AdShooterGame extends Component {
                 maxZ = skyline.z;
             }
             skyline.node.setPosition(skyline.x, skyline.node.position.y, skyline.z);
+        }
+    }
+
+    private setupSideWalks() {
+        for (const sideWalk of this.sideWalkEntities) {
+            if (sideWalk.node.isValid) sideWalk.node.destroy();
+        }
+        this.sideWalkEntities = [];
+        if (!this.sideWalkEnabled || !this.world3DRoot) return;
+
+        const count = Math.max(6, Math.floor(this.sideWalkCountPerSide));
+        const tileLen = 3.0; // SideWalk prefab is a 3x3 plane.
+        const nearZ = this.playerZ - 10;
+        const roadHalfWidth = this.laneCount * this.worldLaneWidth * 0.5;
+        const baseOffset = roadHalfWidth + 1.5 + Math.max(0, this.sideWalkRoadGap); // sidewalk plane is 3x3
+        const leftBaseX = -baseOffset;
+        const rightBaseX = baseOffset;
+
+        for (let i = 0; i < count; i++) {
+            const baseZ = nearZ + i * tileLen;
+            this.createSideWalkTile(leftBaseX, baseZ);
+            this.createSideWalkTile(rightBaseX, baseZ);
+        }
+    }
+
+    private createSideWalkTile(sideBaseX: number, z: number) {
+        let node: Node;
+        if (this.sideWalkPrefab) {
+            node = instantiate(this.sideWalkPrefab);
+            node.name = 'SideWalk';
+            node.layer = Layers.Enum.DEFAULT;
+            this.world3DRoot?.addChild(node);
+        } else {
+            node = this.create3DEntityNode('SideWalk', 3, 0.1, 3);
+        }
+        const finalX = sideBaseX;
+        const y = this.playY + 0.03;
+        node.setPosition(finalX, y, z);
+        this.applyShadowFlags(node, false, true);
+        this.sideWalkEntities.push({ node, x: finalX, z });
+    }
+
+    private updateSideWalks(dt: number) {
+        if (!this.sideWalkEnabled || this.sideWalkEntities.length === 0) return;
+        const speed = Math.max(0, this.roadSpeed * this.sideWalkParallax);
+        const tileLen = 3.0; // SideWalk prefab is a 3x3 plane.
+        const nearZ = this.playerZ - 12;
+        const spacing = tileLen;
+
+        let maxLeftZ = Number.NEGATIVE_INFINITY;
+        let maxRightZ = Number.NEGATIVE_INFINITY;
+        for (const sideWalk of this.sideWalkEntities) {
+            if (!sideWalk.node.isValid) continue;
+            if (sideWalk.x < 0) {
+                if (sideWalk.z > maxLeftZ) maxLeftZ = sideWalk.z;
+            } else {
+                if (sideWalk.z > maxRightZ) maxRightZ = sideWalk.z;
+            }
+        }
+
+        for (const sideWalk of this.sideWalkEntities) {
+            if (!sideWalk.node.isValid) continue;
+            sideWalk.z -= speed * dt;
+            if (sideWalk.z < nearZ) {
+                if (sideWalk.x < 0) {
+                    sideWalk.z = maxLeftZ + spacing;
+                    maxLeftZ = sideWalk.z;
+                } else {
+                    sideWalk.z = maxRightZ + spacing;
+                    maxRightZ = sideWalk.z;
+                }
+            }
+            sideWalk.node.setPosition(sideWalk.x, sideWalk.node.position.y, sideWalk.z);
         }
     }
 
