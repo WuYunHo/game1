@@ -180,7 +180,7 @@
       "__uuid__": "1263d74c-8167-4928-91a6-4e2672411f47@a804a",
       "__expectedType__": "cc.Mesh"
     },
-    "_shadowCastingMode": 0,
+    "_shadowCastingMode": 1,
     "_shadowReceivingMode": 1,
     "_shadowBias": 0,
     "_shadowNormalBias": 0,
@@ -253,15 +253,18 @@
     "__prefab": {
       "__id__": 10
     },
+    "playerZ": 4.5,
     "projectorCamera": null,
-    "cameraHeight": 18,
-    "cameraDepth": -18,
-    "cameraLookAtZ": 20,
     "gatePrefab": {
       "__uuid__": "011da6e7-5f9d-487d-91c4-760a720d2f75",
       "__expectedType__": "cc.Prefab"
     },
     "gatePrefabScale": 1.5,
+    "roadSurface": null,
+    "roadSpeed": 16,
+    "skylineEnabled": true,
+    "skylineParallax": 0.32,
+    "skylineCountPerSide": 8,
     "_id": ""
   },
   {

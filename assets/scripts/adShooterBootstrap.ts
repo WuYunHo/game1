@@ -509,6 +509,9 @@ class AdShooterGame extends Component {
             this.roadSurface = this.findRoadSurfaceFallback();
         }
         this.roadRenderer = this.roadSurface?.getComponent(MeshRenderer) ?? null;
+        if (this.roadSurface) {
+            this.applyShadowFlags(this.roadSurface, false, true);
+        }
         this.roadMaterialInstance = null;
         if (this.roadRenderer) {
             const shared = this.roadRenderer.getSharedMaterial(0) ?? this.roadRenderer.getMaterial(0);
@@ -695,6 +698,7 @@ class AdShooterGame extends Component {
         node.setRotationFromEuler(0, 0, 0);
         node.setScale(2, 2, 2);
         this.world3DRoot.addChild(node);
+        this.applyShadowFlags(node, true, true);
         this.player = node;
         this.playLoopAnimation(node, this.playerClip);
         this.set3DPosition(node, this.playerLane, this.playerZ, this.playY + 1.0);
@@ -786,6 +790,7 @@ class AdShooterGame extends Component {
             node.setRotationFromEuler(0, 180, 0);
             node.setScale(cfg.scaleX, cfg.scaleY, cfg.scaleZ);
             this.world3DRoot?.addChild(node);
+            this.applyShadowFlags(node, true, true);
             this.playMonsterLoopAnimation(node, key);
             return node;
         }
@@ -1129,7 +1134,19 @@ class AdShooterGame extends Component {
         node.layer = Layers.Enum.DEFAULT;
         node.setScale(sx, sy, sz);
         this.world3DRoot?.addChild(node);
+        this.applyShadowFlags(node, true, true);
         return node;
+    }
+
+    private applyShadowFlags(node: Node, castShadow: boolean, receiveShadow: boolean) {
+        const renderers = node.getComponentsInChildren(MeshRenderer);
+        const castMode = castShadow ? 1 : 0;
+        const receiveMode = receiveShadow ? 1 : 0;
+        for (const renderer of renderers) {
+            const r = renderer as unknown as { shadowCastingMode: number; shadowReceivingMode: number };
+            r.shadowCastingMode = castMode;
+            r.shadowReceivingMode = receiveMode;
+        }
     }
 
     private set3DPosition(node: Node, lane: number, z: number, y: number) {
