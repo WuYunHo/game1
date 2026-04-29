@@ -141,8 +141,8 @@
       "__id__": 4
     },
     "_visibility": -325058561,
-    "_illuminanceHDR": 100000,
-    "_illuminance": 100000,
+    "_illuminanceHDR": 30000,
+    "_illuminance": 30000,
     "_illuminanceLDR": 3.2552083333333335,
     "_shadowEnabled": true,
     "_shadowPcf": 2,
