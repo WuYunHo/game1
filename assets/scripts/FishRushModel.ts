@@ -9,7 +9,6 @@ export type Feedback = { id: number; text: string; good: boolean; life: number; 
 
 export const RULES = Object.freeze({
     initialFish: 5,
-    maxFish: 256,
     duration: 60,
     travelTime: 4.2,
     wrongGateLimit: 3,
@@ -110,7 +109,7 @@ export class FishRushModel {
                     this.wrongGateSelections += 1;
                     if (this.wrongGateSelections > RULES.wrongGateLimit) this.pathDefeatArmed = true;
                 }
-                this.fish = Math.min(RULES.maxFish, selectedResult);
+                this.fish = selectedResult;
                 this.peakFish = Math.max(this.peakFish, this.fish);
                 this.score += (this.fish - before) * 10;
                 this.notify(this.fish === before ? '鱼群已满！' : `+${this.fish - before} 伙伴！`, true, this.x);

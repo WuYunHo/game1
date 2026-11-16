@@ -25,7 +25,7 @@ test('right +2 adds two whole fish, not weapon damage',()=>{
 test('centerline deterministically chooses only the right gate and cap is enforced',()=>{
     const m=make();m.fish=200;
     m.encounters=[gate({kind:'add',value:2},{kind:'mul',value:2})];
-    m.tick(.02);assert.equal(m.fish,RULES.maxFish);
+    m.tick(.02);assert.equal(m.fish,400);
 });
 test('contact consumes enemy strength and a school reaching zero loses',()=>{
     const m=make();m.encounters=[enemy()];m.tick(.02);assert.equal(m.fish,2);assert.equal(m.phase,'playing');

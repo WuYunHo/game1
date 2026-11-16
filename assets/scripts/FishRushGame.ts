@@ -4,7 +4,8 @@
     ResolutionPolicy, Sprite, SpriteFrame, UITransform, VerticalTextAlignment, view,
 } from 'cc';
 import { FishRushModel } from './FishRushModel';
-import { Command, composeGame } from './FishRushPresentation';
+import { Command, composeGame, HoverPoint } from './FishRushPresentation';
+import { LeaderboardRow, LeaderboardService } from './LeaderboardService';
 
 const { ccclass } = _decorator;
 type DrawNode = { node: Node; graphics?: Graphics; label?: Label; sprite?: Sprite; signature: string; poolKey: string };
@@ -25,6 +26,12 @@ export class FishRushGame extends Component {
     private renderDirty = true;
     private readyRendered = false;
     private lastPhase = this.model.phase;
+    private hover: HoverPoint = null;
+    private leaderboard = new LeaderboardService();
+    private leaderboardOpen = false;
+    private leaderboardRows: LeaderboardRow[] = [];
+    private subContextNode: Node | null = null;
+    private subContextShowTimer: ReturnType<typeof setTimeout> | null = null;
 
     onLoad() {
         view.setDesignResolutionSize(720, 1280, ResolutionPolicy.SHOW_ALL);
@@ -60,22 +67,23 @@ export class FishRushGame extends Component {
         }
         this.model.tick(dt);
         if (this.model.phase !== this.lastPhase) {
+            if (this.model.phase === 'won') void this.leaderboard.saveScore(this.model.score);
             this.lastPhase = this.model.phase;
             this.renderDirty = true;
             this.readyRendered = false;
         }
-        // Keep the engine's presentation cadence at 60 Hz, but rebuild our
-        // dynamic display list at 30 Hz while playing and once while waiting.
-        // This avoids allocating and traversing hundreds of fish nodes every
-        // update without changing the actual game simulation rate.
+        // Keep the world presentation at the engine cadence. The fish school
+        // is now represented by base-16 evolution units, so the dynamic world
+        // can update at 60 Hz again and objects glide with the road instead of
+        // stepping between two 30 Hz screen positions.
         if (this.model.phase === 'ready') {
             if (this.readyRendered && !this.renderDirty) return;
         } else {
             this.renderAccumulator += Math.min(dt, 0.05);
-            if (!this.renderDirty && this.renderAccumulator < 1 / 30) return;
+            if (!this.renderDirty && this.renderAccumulator < 1 / 60) return;
             this.renderAccumulator = 0;
         }
-        const commands = composeGame(this.model);
+        const commands = composeGame(this.model, this.hover, { open: this.leaderboardOpen, rows: this.leaderboardRows });
         if (!this.artReady) {
             const button = commands.find(c => c.id === 'buttonText');
             if (button) button.text = this.loadError ? '资源加载失败，请重新预览' : '伙伴集结中…';
@@ -86,6 +94,7 @@ export class FishRushGame extends Component {
     }
 
     private render(commands: Command[]) {
+        commands = this.batchPrimitiveRuns(commands);
         commands = this.batchLargeSchool(commands);
         const live = new Set<string>();
         let index = 0;
@@ -131,6 +140,8 @@ export class FishRushGame extends Component {
                 g.lineWidth = c.line ?? 1;
                 if (c.kind === 'school') {
                     this.drawSchoolBatch(g, c.fishGlyphs ?? []);
+                } else if (c.kind === 'graphicsBatch') {
+                    this.drawGraphicsBatch(g, c.graphicsCommands ?? []);
                 } else if (c.kind === 'ellipse') g.ellipse(0,0,w/2,h/2);
                 else if (c.kind === 'rect') g.roundRect(-w/2,-h/2,w,h,Math.min(c.radius ?? 0,w/2,h/2));
                 else if (c.points?.length) {
@@ -147,6 +158,43 @@ export class FishRushGame extends Component {
             if (live.has(id)) continue;
             this.releaseDrawNode(item);
             this.drawNodes.delete(id);
+        }
+    }
+
+    private batchPrimitiveRuns(commands: Command[]): Command[] {
+        const primitive = (kind: Command['kind']) => kind === 'rect' || kind === 'ellipse' || kind === 'polygon';
+        const out: Command[] = [];
+        let run: Command[] = [];
+        const flush = () => {
+            if (run.length === 0) return;
+            if (run.length === 1) out.push(run[0]);
+            else out.push({ id: `graphicsBatch-${run[0].id}`, kind: 'graphicsBatch', x: 360, y: 640, w: 720, h: 1280, graphicsCommands: run });
+            run = [];
+        };
+        for (const command of commands) {
+            if (primitive(command.kind)) run.push(command);
+            else { flush(); out.push(command); }
+        }
+        flush();
+        return out;
+    }
+
+    private drawGraphicsBatch(g: Graphics, commands: Command[]) {
+        for (const c of commands) {
+            const x = c.x ?? 360, y = c.y ?? 640;
+            const w = c.w ?? 1, h = c.h ?? 1;
+            g.fillColor = new Color(c.fill ?? '#ffffff');
+            g.strokeColor = new Color(c.stroke ?? '#153d59');
+            g.lineWidth = c.line ?? 1;
+            if (c.kind === 'ellipse') g.ellipse(x - 360, 640 - y, w / 2, h / 2);
+            else if (c.kind === 'rect') g.roundRect(x - 360 - w / 2, 640 - y - h / 2, w, h, Math.min(c.radius ?? 0, w / 2, h / 2));
+            else if (c.points?.length) {
+                g.moveTo(c.points[0][0] - 360, 640 - c.points[0][1]);
+                for (const point of c.points.slice(1)) g.lineTo(point[0] - 360, 640 - point[1]);
+                g.close();
+            }
+            g.fill();
+            if (c.stroke) g.stroke();
         }
     }
 
@@ -234,6 +282,7 @@ export class FishRushGame extends Component {
     private commandSignature(c: Command): string {
         const points = c.points ? c.points.map((p) => `${p[0]},${p[1]}`).join(';') : '';
         const glyphs = c.kind === 'school' ? (c.fishGlyphs ?? []) : [];
+        const batched = c.kind === 'graphicsBatch' ? (c.graphicsCommands ?? []) : [];
         const schoolSignature = glyphs.length === 0 ? '0' : [
             glyphs.length,
             glyphs[0].x, glyphs[0].y,
@@ -245,6 +294,7 @@ export class FishRushGame extends Component {
             c.fill ?? '', c.stroke ?? '', c.line ?? 1, c.text ?? '', c.size ?? 24,
             c.bold ?? true, c.asset ?? '', c.tint ?? '', points,
             c.kind === 'school' ? schoolSignature : '',
+            c.kind === 'graphicsBatch' ? batched.map((item) => [item.kind, item.x, item.y, item.w, item.h, item.fill, item.stroke].join(',')).join(';') : '',
             c.kind === 'image' ? Boolean(this.frames[c.asset!]) : '',
         ].join('|');
     }
@@ -252,18 +302,56 @@ export class FishRushGame extends Component {
     private move(x: number) {
         if(this.model.phase==='playing') { this.model.steer((x-360)/294); this.renderDirty = true; }
     }
+    private setHover(x: number, y: number) {
+        this.hover = { x, y };
+        this.renderDirty = true;
+    }
     private tap(x: number,y: number) {
+        if (x > 635 && y < 95) { void this.toggleLeaderboard(); return; }
+        if (this.leaderboardOpen && x > 220 && x < 500 && y > 835 && y < 915) { this.leaderboardOpen = false; this.renderDirty = true; return; }
         if(this.model.phase==='playing' || !this.artReady) return;
         if(x<124 || x>596 || y<812 || y>898) return;
         this.model.start(this.model.phase==='won' ? this.model.stage+1 : this.model.stage);
         this.renderDirty = true;
     }
-    private onTouchStart(e: EventTouch) { this.pointerDown=true; this.move(e.getUILocation().x); }
-    private onTouchMove(e: EventTouch) { if(this.pointerDown) this.move(e.getUILocation().x); }
+    private async toggleLeaderboard() {
+        this.leaderboardOpen = !this.leaderboardOpen;
+        this.ensureWechatSubContext();
+        if (this.subContextShowTimer) { clearTimeout(this.subContextShowTimer); this.subContextShowTimer = null; }
+        if (this.leaderboardOpen) {
+            this.leaderboardRows = [
+                { name: 'YOU', score: this.model.score, self: true },
+                { name: 'BLUE FIN', score: Math.max(120, this.model.score - 18) },
+                { name: 'CAPTAIN MOUSE', score: Math.max(90, this.model.score - 41) },
+            ];
+            this.subContextShowTimer = setTimeout(() => {
+                if (this.leaderboardOpen && this.subContextNode?.isValid) this.subContextNode.active = true;
+                this.subContextShowTimer = null;
+            }, 250);
+            this.leaderboardRows = await this.leaderboard.requestFriendBoard();
+        } else if (this.subContextNode?.isValid) {
+            this.subContextNode.active = false;
+        }
+        this.renderDirty = true;
+    }
+
+    private ensureWechatSubContext() {
+        const wx = (globalThis as unknown as { wx?: unknown }).wx;
+        if (!wx || this.subContextNode?.isValid) return;
+        const node = new Node('LeaderboardSubContext');
+        node.layer = Layers.Enum.UI_2D;
+        node.addComponent(UITransform).setContentSize(520, 620);
+        this.node.addChild(node);
+        try { node.addComponent('cc.SubContextView' as never); } catch (error) { console.warn('SubContextView unavailable until WeChat build', error); }
+        node.active = false;
+        this.subContextNode = node;
+    }
+    private onTouchStart(e: EventTouch) { this.pointerDown=true; const p=e.getUILocation(); this.setHover(p.x,1280-p.y); this.move(p.x); }
+    private onTouchMove(e: EventTouch) { const p=e.getUILocation(); this.setHover(p.x,1280-p.y); if(this.pointerDown) this.move(p.x); }
     private onTouchEnd(e: EventTouch) { this.pointerDown=false; const p=e.getUILocation(); this.tap(p.x,1280-p.y); }
     private onTouchCancel() { this.pointerDown=false; }
     private onMouseDown(e: EventMouse) { if(e.getButton()===0) this.pointerDown=true; }
-    private onMouseMove(e: EventMouse) { this.move(e.getUILocation().x); }
+    private onMouseMove(e: EventMouse) { const p=e.getUILocation(); this.setHover(p.x,1280-p.y); this.move(p.x); }
     private onMouseUp(e: EventMouse) { if(e.getButton()!==0)return; this.pointerDown=false; const p=e.getUILocation(); this.tap(p.x,1280-p.y); }
     private onKeyDown(e: EventKeyboard) {
         if(e.keyCode===KeyCode.ARROW_LEFT || e.keyCode===KeyCode.KEY_A) this.left=true;

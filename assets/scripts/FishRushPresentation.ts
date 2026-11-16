@@ -1,14 +1,17 @@
-import { FishRushModel, Gate, RULES } from './FishRushModel';
+﻿import { FishRushModel, Gate, RULES } from './FishRushModel';
+import { LeaderboardRow } from './LeaderboardService';
 
 export type Ink = string;
 export type Command = {
-    id: string; kind: 'rect' | 'ellipse' | 'polygon' | 'text' | 'image' | 'school';
+    id: string; kind: 'rect' | 'ellipse' | 'polygon' | 'text' | 'image' | 'school' | 'graphicsBatch';
     x?: number; y?: number; w?: number; h?: number; radius?: number;
     fill?: Ink; stroke?: Ink; line?: number; points?: number[][];
     text?: string; size?: number; bold?: boolean; asset?: 'fish' | 'squirrel'; alpha?: number; tint?: Ink;
     fishGlyphs?: Array<{ x: number; y: number; size: number }>;
+    graphicsCommands?: Command[];
 };
 export type FishVisualUnit = { level: number };
+export type HoverPoint = { x: number; y: number } | null;
 export const FISH_EVOLUTION_BASE = 16;
 
 export function fishVisualUnits(count: number): FishVisualUnit[] {
@@ -47,7 +50,7 @@ export const schoolProject = (x: number, depth: number, row: number) => {
 };
 
 /** Shared display list: the Cocos and browser previews render identical artwork and rules. */
-export function composeGame(m: FishRushModel): Command[] {
+export function composeGame(m: FishRushModel, hover: HoverPoint = null, leaderboard: { open: boolean; rows: LeaderboardRow[] } = { open: false, rows: [] }): Command[] {
     const c: Command[] = [];
     const rect = (id: string, x: number, y: number, w: number, h: number, fill: string, radius = 0, stroke?: string, line = 3) =>
         c.push({ id, kind: 'rect', x, y, w, h, fill, radius, stroke, line });
@@ -59,6 +62,7 @@ export function composeGame(m: FishRushModel): Command[] {
         c.push({ id, kind: 'text', x, y, w: 700, h: size * 1.6, text: value, size, fill, bold });
     const sprite = (id: string, asset: 'fish' | 'squirrel', x: number, y: number, w: number, h = w, tint?: string) =>
         c.push({ id, kind: 'image', asset, x, y, w, h, tint });
+    const isHover = (x: number, y: number, w: number, h: number) => !!hover && Math.abs(hover.x - x) <= w / 2 && Math.abs(hover.y - y) <= h / 2;
 
     rect('sky', 360, 640, 720, 1280, '#b4ebf4');
     oval('sunGlow', 586, 248, 160, 160, '#c9f2ed');
@@ -112,10 +116,13 @@ export function composeGame(m: FishRushModel): Command[] {
                 const g = e.gates![half];
                 const q = project(half === 0 ? -0.51 : 0.51, e.depth);
                 const x = q.x, y = q.y;
-                const color = g.kind === 'mul' ? '#437df1' : '#13b99d';
+                const baseColor = g.kind === 'mul' ? '#437df1' : '#13b99d';
                 const width = 274*s, height = 152*s;
+                const hovered = isHover(x, y, width, height);
+                const color = hovered ? (g.kind === 'mul' ? '#6b9cff' : '#42e0bd') : baseColor;
+                const hoverScale = hovered ? 1.045 : 1;
                 oval(`gshadow${e.id}-${half}`, x, y + 13*s, width, 24*s, '#2699b2');
-                rect(`gback${e.id}-${half}`, x, y-height/2, width, height, color, 18*s, N, Math.max(1,4*s));
+                rect(`gback${e.id}-${half}`, x, y-height/2, width*hoverScale, height*hoverScale, color, 18*s, N, Math.max(1,4*s));
                 rect(`gshine${e.id}-${half}`, x, y-height+15*s, width-20*s, 8*s, g.kind==='mul' ? '#91c0ff' : '#8ff5cf', 4*s);
                 rect(`gpoleL${e.id}-${half}`, x-width/2+7*s, y-8*s, 14*s, 44*s, '#fff4ce', 4*s, N, 2*s);
                 rect(`gpoleR${e.id}-${half}`, x+width/2-7*s, y-8*s, 14*s, 44*s, '#fff4ce', 4*s, N, 2*s);
@@ -171,54 +178,57 @@ export function composeGame(m: FishRushModel): Command[] {
         fishCommands.push({ depth: depth + 0.001 + stack * 0.001, command: { id:`fish${i}`, kind:'image', asset:'fish', x:p.x+stackOffset, y:p.y-10*visualScale+bob, w:68*visualScale, h:68*visualScale, tint: unitLevel === 0 ? '#ffffff' : unitLevel === 1 ? '#bcecff' : unitLevel === 2 ? '#ffe7a3' : '#ffc4ee' } });
     }
     fishCommands.sort((a,b)=>a.depth-b.depth).forEach(({command})=>c.push(command));
-    rect('countShadow',leader.x,1134,152,48,'#1e718d',18);
-    rect('count',leader.x,1128,152,48,'#fff6dc',18,N,3);
-    text('countText',`${m.fish} 伙伴`,leader.x,1127,23);
+    // Lightweight Duolingo-like HUD: progress, score, school count, one action.
+    rect('count', leader.x, 1132, 132, 42, '#fff6dc', 21, N, 3);
+    text('countText', String(m.fish), leader.x, 1131, 22, N);
     for (const f of m.feedback) {
-        const x = project(f.x,1).x;
-        const y = 859-(1.35-f.life)*65;
-        text(`feedbackShadow${f.id}`,f.text,x+2,y+3,27,N);
-        text(`feedback${f.id}`,f.text,x,y,27,f.good?'#fff5a9':'#ffe0e3');
+        const x = project(f.x, 1).x;
+        const y = 859 - (1.35 - f.life) * 65;
+        text('feedbackShadow' + f.id, f.text, x + 2, y + 3, 27, N);
+        text('feedback' + f.id, f.text, x, y, 27, f.good ? '#fff5a9' : '#ffe0e3');
     }
-    // Cream cards and dark outlines keep the HUD legible on a bright world.
-    rect('topShadow',360,70,660,90,'#67bfc8',25);
-    rect('top',360,63,660,90,'#fff6dc',25,N,3);
-    text('brand','DEEPSEA',149,48,27);
-    text('brandSub','肥鱼大冒险',149,80,19,'#5e8c94');
-    text('chapter',`海岛水道  ${String(m.stage).padStart(2,'0')}`,393,49,22);
-    text('time',m.phase==='playing'?`${Math.max(0,Math.ceil(60-m.elapsed))}s`:'集结 · 出发',393,80,18,'#5e8c94');
-    rect('scorePill',607,63,122,62,'#ffdf7f',17);
-    text('scoreTitle','得分',607,47,15);
-    text('score',`${m.score}`,607,73,24);
-    rect('progressBack',360,130,630,10,'#8cccd3',5);
-    const progress = Math.max(0.02, Math.min(1,m.elapsed/60));
-    rect('progress',45+630*progress/2,130,630*progress,10,'#fff6dc',5);
-    text('routeTitle','集结鱼群  /  选择更强增益门  /  躲开飞飞鼠首领',360,165,18,N,false);
-    rect('bottom',360,1231,670,58,'#fff6dc',20,N,3);
-    text('bottomText',m.phase==='playing'?'←  左右滑动选择增益门  →':'DEEPSEEK 鱼群  ×  FAKER 飞鼠',360,1231,20);
+
+    rect('top', 360, 58, 720, 82, '#fff6dc', 0, N, 4);
+    text('brand', 'DEEPSEA', 72, 39, 21, N);
+    text('chapter', 'ISLAND ' + String(m.stage).padStart(2, '0'), 360, 39, 18, '#5e8c94');
+    rect('scorePill', 570, 58, 98, 46, '#ffdf6f', 18, N, 3);
+    text('score', String(m.score), 570, 58, 22, N);
+    const boardHover = isHover(680, 58, 76, 46);
+    rect('leaderboardButton', 680, 58, boardHover ? 82 : 76, boardHover ? 50 : 46, boardHover ? '#ffef9a' : '#ffe49a', 18, N, 3);
+    text('leaderboardIcon', 'TOP', 680, 58, 16, N);
+    // Chunky candy-like progress bar: dark shell, thick fill and a bright cap.
+    rect('progressBack', 360, 101, 624, 28, '#173f55', 14, N, 3);
+    const progress = Math.max(0.02, Math.min(1, m.elapsed / 60));
+    rect('progress', 50 + 620 * progress / 2, 101, 620 * progress, 20, '#45c9a5', 10, N, 2);
+    rect('progressShine', 50 + 620 * progress / 2, 96, Math.max(8, 620 * progress - 18), 5, '#a7f5cf', 3);
+
     if (m.phase !== 'playing') {
-        rect('scrim',360,640,720,1280,'#123a5b80');
-        rect('modalShadow',360,658,604,626,'#163c63',32);
-        rect('modal',360,643,604,626,'#fff6dc',32,N,4);
-        rect('tag',360,368,228,38,'#ffdb79',15);
-        text('tagText','OCEAN SQUAD RUN',360,368,17);
-        const ready=m.phase==='ready', won=m.phase==='won';
-        text('modalTitle',ready?'肥鱼，集合！':won?'漂亮！突围成功':'鱼群需要你',360,430,44);
-        text('modalSubtitle',ready?'小小肥鱼，也能掀起大浪':won?'下一片海域，继续壮大队伍':'再选一次，组建更强的鱼群',360,480,21,'#5e8c94',false);
-        sprite('modalFish','fish',291,586,180);
-        sprite('modalEnemy','squirrel',458,591,147);
-        text('vs','VS',375,581,24,'#d56c58');
-        if(ready) {
-            text('rule1','×2 翻倍鱼群    +2 加入两位伙伴',360,706,22);
-            text('rule2','碰撞消耗伙伴 · 避开红色飞鼠 · 留足首领战力',360,750,18,'#5e8c94',false);
-        } else {
-            text('result',`得分 ${m.score}    最大鱼群 ${m.peakFish}`,360,704,25);
-            text('resultHint',won?`剩余 ${m.fish} 位伙伴 · 第 ${m.stage} 关完成`:'鱼群归零 · 试着选择翻倍门并绕开敌人',360,749,19,'#5e8c94',false);
-        }
-        rect('buttonShadow',360,866,472,86,'#147d78',24,N,3);
-        rect('button',360,855,472,86,'#39d7b6',24,N,3);
-        text('buttonText',ready?'出发，冲向大海！':won?'前往下一海域  →':'重新集结  ↻',360,854,29);
-        text('modalFooter','滑动 / 鼠标移动 / 方向键 均可操控',360,924,17,'#6d9297',false);
+        rect('scrim', 360, 640, 720, 1280, '#153d5933', 0);
+        rect('modal', 360, 642, 560, 590, '#fff6dc', 34, N, 4);
+        const ready = m.phase === 'ready', won = m.phase === 'won';
+        text('modalTitle', ready ? 'READY?' : won ? 'DONE!' : 'TRY AGAIN', 360, 390, 42, N);
+        sprite('modalFish', 'fish', 292, 560, 178);
+        sprite('modalEnemy', 'squirrel', 462, 565, 145);
+        if (!ready) text('result', String(m.score) + '  ·  ' + String(m.fish) + ' FISH', 360, 716, 24, '#5e8c94', false);
+        const buttonHover = isHover(360, 832, 420, 82);
+        rect('button', 360, 832, buttonHover ? 438 : 420, buttonHover ? 88 : 82, buttonHover ? '#65e7c3' : '#39d7b6', 30, N, 4);
+        text('buttonText', ready ? 'GO' : won ? 'NEXT  →' : 'RETRY  ↻', 360, 831, 29, N);
+    } else {
+        text('hint', 'SWIPE LEFT / RIGHT', 360, 1230, 18, '#5e8c94', false);
+    }
+    if (leaderboard.open) {
+        rect('leaderboardScrim', 360, 640, 720, 1280, '#153d5966', 0);
+        rect('leaderboardPanel', 360, 640, 520, 620, '#fff6dc', 34, N, 5);
+        text('leaderboardTitle', 'FRIENDS', 360, 400, 34, N);
+        leaderboard.rows.slice(0, 5).forEach((row, index) => {
+            const y = 500 + index * 62;
+            rect('leaderRow' + index, 360, y, 420, 48, row.self ? '#b8f2db' : '#f6e8b8', 18, N, 2);
+            text('leaderName' + index, String(index + 1) + '  ' + row.name, 270, y, 18, N, false);
+            text('leaderScore' + index, String(row.score), 490, y, 20, N);
+        });
+        const closeHover = isHover(360, 875, 260, 64);
+        rect('leaderboardClose', 360, 875, closeHover ? 274 : 260, closeHover ? 70 : 64, closeHover ? '#65e7c3' : '#39d7b6', 24, N, 4);
+        text('leaderboardCloseText', 'CLOSE', 360, 875, 22, N);
     }
     return c;
 }

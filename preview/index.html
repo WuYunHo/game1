@@ -17,7 +17,7 @@ const { FishRushModel, composeGame } = FishRush;
 const model = new FishRushModel();
 const canvas = document.getElementById('game'), ctx=canvas.getContext('2d');
 const images = {}, keys=new Set();
-let ready=false, last=0, down=false;
+let ready=false, last=0, down=false, hover=null;
 Promise.all(['fish','squirrel'].map(key=>new Promise((resolve,reject)=>{
  const image=new Image();image.onload=()=>{images[key]=image;resolve()};image.onerror=reject;
  image.src='/assets/resources/art/'+(key==='fish'?'deepseek-fish':'faker-squirrel')+'.png';
@@ -40,8 +40,8 @@ function draw(c){
 }
 function start(){if(ready&&model.phase!=='playing')model.start(model.phase==='won'?model.stage+1:model.stage)}
 function point(e){const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)*720/r.width,y:(e.clientY-r.top)*1280/r.height}}
-canvas.addEventListener('pointerdown',e=>{down=true;canvas.setPointerCapture(e.pointerId);canvas.focus();if(model.phase==='playing')model.steer((point(e).x-360)/294)});
-canvas.addEventListener('pointermove',e=>{if(e.pointerType==='mouse'||down)model.steer((point(e).x-360)/294)});
+canvas.addEventListener('pointerdown',e=>{down=true;canvas.setPointerCapture(e.pointerId);canvas.focus();const p=point(e);hover=p;if(model.phase==='playing')model.steer((p.x-360)/294)});
+canvas.addEventListener('pointermove',e=>{const p=point(e);hover=p;if(e.pointerType==='mouse'||down)model.steer((p.x-360)/294)});
 canvas.addEventListener('pointerup',e=>{down=false;const p=point(e);if(p.x>=124&&p.x<=596&&p.y>=812&&p.y<=898)start()});
 canvas.addEventListener('pointercancel',()=>down=false);
 window.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight',' ','Enter','a','d','A','D'].includes(e.key)){e.preventDefault();keys.add(e.key);if(e.key==='Enter'||e.key===' ')start()}});
@@ -52,7 +52,7 @@ function frame(t){const dt=last?Math.min((t-last)/1000,.05):0;last=t;
  const right=keys.has('ArrowRight')||keys.has('d')||keys.has('D'),left=keys.has('ArrowLeft')||keys.has('a')||keys.has('A');
  if(model.phase==='playing'&&(right||left))model.steer(model.targetX+(Number(right)-Number(left))*dt*2.2);
  model.tick(dt);ctx.clearRect(0,0,720,1280);
- const commands=composeGame(model);if(!ready){const b=commands.find(c=>c.id==='buttonText');if(b)b.text='伙伴集结中…'}
+ const commands=composeGame(model,hover);if(!ready){const b=commands.find(c=>c.id==='buttonText');if(b)b.text='LOADING'}
  commands.forEach(draw);requestAnimationFrame(frame);
 }requestAnimationFrame(frame);
 </script>
