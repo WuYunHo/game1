@@ -1,0 +1,13 @@
+﻿{
+    "tool":  "built-in image_gen",
+    "fish":  {
+                 "file":  "assets/resources/art/deepseek-fish.png",
+                 "prompt":  "Use case: stylized-concept. Asset type: single transparent 2D game character sprite for a portrait casual runner. Subject: DeepSeek inspired extremely chubby blue-and-white whale / flying fish mascot, rounded cobalt blue body, creamy white belly, tiny fins and tail, very large expressive eyes, happy determined smile, tiny forehead sparkle. Western cute cartoon mobile game illustration, thick navy outlines, simple bold cel shading, polished hand drawn 2D not 3D render. Full body, three-quarter frontal view facing slightly upward toward the camera, symmetrical readable silhouette, centered on square canvas with 8% clear padding. Character only. No ground shadow, no backdrop, no text, no border. Actually transparent alpha background.",
+                 "reference":  "C:/Users/Admin/AppData/Local/Temp/codex-clipboard-0a5de4e0-e058-46b4-8388-973cb37f46c9.png"
+             },
+    "squirrel":  {
+                     "file":  "assets/resources/art/faker-squirrel.png",
+                     "prompt":  "Use case: stylized-concept. Asset type: single transparent 2D enemy character sprite for a Western cute cartoon mobile game. Subject: Faker inspired chibi flying squirrel mascot, plump warm brown flying squirrel with big fluffy tail, spread little gliding membranes, round black glasses, confident competitive smirk, wearing a RED and BLACK esports jersey with a small gold star, no lettering or logo. NOT a human, clearly a cute animal squirrel. Bold thick dark navy outlines, polished cel shading, warm highlights, hand drawn 2D illustration not 3D render. Full body, three-quarter FRONT view, feet and tail fully in frame. Centered square with 8 percent padding. Exactly one character, transparent alpha background, no ground shadow, no props, no text, no backdrop.",
+                     "reference":  "C:/Users/Admin/AppData/Local/Temp/codex-clipboard-3333c47b-5197-4fb0-8908-61177a480a1c.png"
+                 }
+}
