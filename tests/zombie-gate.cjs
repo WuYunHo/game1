@@ -133,24 +133,66 @@ test('level spawns map-fixed weapon crates with hp 20 and width-1 lane', () => {
     assert.equal(crate.claimed, false);
 });
 
+test('weapon crate takes squad damage n per pellet hit', () => {
+    const m = play();
+    m.gates = [];
+    m.enemies = [];
+    m.weaponTier = 0; // pellets = 1
+    m.unitCount = 5;
+    m.weaponCrates = [{
+        id: 9, lane: 2, y: 2, hp: 20, maxHp: 20, tier: 1, hitFlash: 0, claimed: false,
+    }];
+    m.fireCooldown = 0;
+    m.playerY = 0;
+    m.tick(0.02);
+    assert.equal(m.weaponCrates[0].hp, 15); // -5
+    assert.ok(m.feedback.some(f => f.kind === 'damage' && f.text === '-5'));
+});
+
+test('assault pellets apply -n three times to a weapon crate', () => {
+    const m = play();
+    m.gates = [];
+    m.enemies = [];
+    m.weaponTier = 2; // pellets = 3, damage = 1
+    m.unitCount = 4;
+    m.weaponCrates = [{
+        id: 9, lane: 2, y: 2, hp: 40, maxHp: 40, tier: 2, hitFlash: 0, claimed: false,
+    }];
+    m.fireCooldown = 0;
+    m.playerY = 0;
+    m.tick(0.02);
+    assert.equal(m.weaponCrates[0].hp, 28); // -4 * 3
+    assert.equal(m.feedback.filter(f => f.text === '-4').length, 3);
+});
+
 test('destroying a weapon crate claims its weapon tier', () => {
     const m = play();
     m.gates = [];
     m.enemies = [];
     m.weaponTier = 0;
-    m.weaponCrates = [{
-        id: 9, lane: 2, y: 2, hp: 2, maxHp: 20, tier: 1, hitFlash: 0, claimed: false,
-    }];
     m.unitCount = 5;
+    m.weaponCrates = [{
+        id: 9, lane: 2, y: 2, hp: 5, maxHp: 20, tier: 1, hitFlash: 0, claimed: false,
+    }];
     m.fireCooldown = 0;
     m.playerY = 0;
-    m.tick(0.02); // chips 1 (pellets=1 per target)
-    assert.equal(m.weaponCrates[0].hp, 1);
-    m.fireCooldown = 0;
-    m.tick(0.02);
+    m.tick(0.02); // -5 → claimed
     assert.equal(m.weaponCrates.length, 0);
     assert.equal(m.weaponTier, 1);
     assert.equal(m.weapon.name, WEAPONS[1].name);
+});
+
+test('level includes double-penalty gate rows', () => {
+    const { LEVEL_1 } = require('../assets/scripts/ZombieGateLevel.ts');
+    const { resolveGateDef } = require('../assets/scripts/ZombieGateConfig.ts');
+    const doubleBad = LEVEL_1.gates.filter(row => {
+        const l = resolveGateDef(row.left);
+        const r = resolveGateDef(row.right);
+        return !l.good && !r.good;
+    });
+    assert.ok(doubleBad.length >= 2, 'expected at least two double-penalty rows');
+    const mulRows = LEVEL_1.gates.filter(row => resolveGateDef(row.left).kind === 'mul' || resolveGateDef(row.right).kind === 'mul');
+    assert.equal(mulRows.length, 1, '×2 should appear once');
 });
 
 test('default bullet damage is 1 and normal fly-mouse hp is 1', () => {

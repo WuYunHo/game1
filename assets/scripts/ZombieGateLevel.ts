@@ -20,21 +20,26 @@ export type WeaponCrateBlueprint = {
 export type EnemySpawn = { lane: number; kind: EnemyKind };
 export type EnemyRowBlueprint = { row: number; spawns: EnemySpawn[] };
 
-/** ~60s at forwardSpeed 1 row/s. Growth doors balanced with − / ÷ risk. */
+/**
+ * Gate mix stops infinite snowballing:
+ * - growth always faces a real penalty on the other side
+ * - several rows are double-penalty (sub/div both sides)
+ * - ×2 appears at most once and is paired with ÷2
+ */
 export const LEVEL_1: {
     gates: GateRowBlueprint[];
     weaponCrates: WeaponCrateBlueprint[];
     enemyRows: EnemyRowBlueprint[];
 } = {
     gates: [
-        { row: 3, left: 'add3', right: 'sub2' },
-        { row: 7, left: 'div2', right: 'add4' },
-        { row: 11, left: 'add2', right: 'sub3' },
-        { row: 15, left: 'mul2', right: 'sub5' },
-        { row: 21, left: 'sub2', right: 'add3' },
-        { row: 27, left: 'add4', right: 'div2' },
-        { row: 35, left: 'sub3', right: 'add5' },
-        { row: 45, left: 'mul2', right: 'sub5' },
+        { row: 3, left: 'add2', right: 'sub2' },
+        { row: 7, left: 'sub3', right: 'sub1' },       // double penalty
+        { row: 11, left: 'add3', right: 'div2' },
+        { row: 15, left: 'sub2', right: 'sub5' },       // double penalty
+        { row: 21, left: 'mul2', right: 'div2' },       // only ×2, high risk
+        { row: 27, left: 'sub3', right: 'add2' },
+        { row: 35, left: 'div2', right: 'sub2' },       // double penalty
+        { row: 45, left: 'add3', right: 'sub5' },
     ],
     weaponCrates: [
         { row: 8, lane: 1, crate: 'dual' },

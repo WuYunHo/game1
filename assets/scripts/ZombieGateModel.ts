@@ -420,6 +420,10 @@ export class ZombieGateModel {
 
             const toLane = target.kind === 'enemy' ? target.ref.displayLane : target.ref.lane;
             const toY = target.ref.y;
+            // Enemies take flat bullet damage; weapon crates take squad volley damage (n × dmg).
+            const hitDamage = target.kind === 'crate'
+                ? Math.max(1, this.unitCount) * weapon.damage
+                : weapon.damage;
             this.shots.push({
                 id: this.nextId++,
                 fromLane: this.displayLane,
@@ -429,13 +433,13 @@ export class ZombieGateModel {
                 life: 0.14,
                 maxLife: 0.14,
                 tier: this.weaponTier,
-                damage: weapon.damage,
+                damage: hitDamage,
             });
 
             if (target.kind === 'enemy') {
-                this.damageEnemy(target.ref, weapon.damage);
+                this.damageEnemy(target.ref, hitDamage);
             } else {
-                this.damageCrate(target.ref, weapon.damage);
+                this.damageCrate(target.ref, hitDamage);
             }
         }
         this.enemies = this.enemies.filter(e => e.state !== 'dead');
