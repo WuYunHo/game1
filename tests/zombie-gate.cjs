@@ -7,6 +7,7 @@ const {
 const { GATE_DEFS, WEAPON_CRATE_DEFS, resolveGateDef } = require('../assets/scripts/ZombieGateConfig.ts');
 const {
     composeZombieGate, laneToX, worldToScreenY, laneFromX, BOARD_COLS, BORDER_LEFT, BORDER_RIGHT,
+    GATE_COLS_LEFT, GATE_COLS_RIGHT,
 } = require('../assets/scripts/ZombieGatePresentation.ts');
 
 const play = () => {
@@ -69,10 +70,12 @@ test('displayLane eases toward logical lane after a discrete shift', () => {
     assert.ok(Math.abs(m.displayLane - 1) < 1e-6);
 });
 
-test('sideForLane uses leftLaneMax inclusive', () => {
+test('sideForLane splits evenly for equal 5-tile gates', () => {
     assert.equal(sideForLane(0), 'left');
-    assert.equal(sideForLane(2), 'left');
-    assert.equal(sideForLane(3), 'right');
+    assert.equal(sideForLane(1), 'left');
+    assert.equal(sideForLane(2), 'right');
+    assert.equal(sideForLane(4), 'right');
+    assert.equal(ZG_RULES.leftLaneMax, 1);
 });
 
 test('add and sub gates change the squad with caps', () => {
@@ -213,6 +216,13 @@ test('board is 12 cols with side borders and fills screen mapping', () => {
     assert.equal(laneFromX(719), 4);
     assert.ok(laneToX(0) > 60); // inside playable, not on left border
     assert.ok(laneToX(4) < 660);
+});
+
+test('left and right gates are the same 5-tile footprint', () => {
+    assert.equal(GATE_COLS_LEFT.length, 5);
+    assert.equal(GATE_COLS_RIGHT.length, 5);
+    assert.deepEqual([...GATE_COLS_LEFT], [1, 2, 3, 4, 5]);
+    assert.deepEqual([...GATE_COLS_RIGHT], [6, 7, 8, 9, 10]);
 });
 
 test('presentation draws crates and keeps command ids unique', () => {

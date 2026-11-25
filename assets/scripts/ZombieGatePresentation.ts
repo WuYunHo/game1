@@ -31,6 +31,9 @@ const ROW_PX = TILE_W;
 const LANE_W = TILE_W * TILES_PER_LANE;
 const CELL_W = LANE_W - CELL_GAP;
 const GATE_H = Math.max(14, (ROW_PX - CELL_GAP) * 0.5);
+/** Equal-width gates: 5 playable tiles each (same type / footprint). */
+export const GATE_COLS_LEFT = [1, 2, 3, 4, 5] as const;
+export const GATE_COLS_RIGHT = [6, 7, 8, 9, 10] as const;
 /** Player sits near lower third; camera scrolls the full-height board. */
 const PLAYER_SCREEN_Y = H * 0.72;
 const VISIBLE_ROWS = Math.ceil(H / ROW_PX) + 2;
@@ -110,17 +113,19 @@ export function composeZombieGate(model: ZombieGateModel, hover: { x: number; y:
     });
 
     const bandY = worldToScreenY(model.playerY + 3.2, cameraY);
+    const leftBandX = (colToX(GATE_COLS_LEFT[0]) + colToX(GATE_COLS_LEFT[4])) / 2;
+    const rightBandX = (colToX(GATE_COLS_RIGHT[0]) + colToX(GATE_COLS_RIGHT[4])) / 2;
     cmds.push({
         id: 'sideLeft', kind: 'rect',
-        x: (laneToX(0) + laneToX(2)) / 2, y: bandY,
-        w: LANE_W * 3 - 6, h: 8,
-        fill: playerSide === 'left' ? '#3aa0b8' : '#2a4552', radius: 2,
+        x: leftBandX, y: bandY,
+        w: TILE_W * 5 - 4, h: 6,
+        fill: playerSide === 'left' ? '#3aa0b8' : '#2a4552', radius: 0,
     });
     cmds.push({
         id: 'sideRight', kind: 'rect',
-        x: (laneToX(3) + laneToX(4)) / 2, y: bandY,
-        w: LANE_W * 2 - 6, h: 8,
-        fill: playerSide === 'right' ? '#3aa0b8' : '#2a4552', radius: 2,
+        x: rightBandX, y: bandY,
+        w: TILE_W * 5 - 4, h: 6,
+        fill: playerSide === 'right' ? '#3aa0b8' : '#2a4552', radius: 0,
     });
 
     const frontY = worldToScreenY(model.playerY, cameraY);
@@ -173,48 +178,77 @@ function drawGate(
 ) {
     const y = worldToScreenY(gate.row, cameraY);
     if (y < -60 || y > H + 60) return;
-    const lanes = gate.side === 'left' ? [0, 1, 2] : [3, 4];
+    // Both sides are the same type: exactly 5 board tiles wide.
+    const cols = gate.side === 'left' ? GATE_COLS_LEFT : GATE_COLS_RIGHT;
     const approaching = !gate.resolved && gate.row - model.playerY < 5 && gate.row >= model.playerY - 0.2;
     const chosenSide = approaching && gate.side === playerSide;
     const flash = gate.resolveFlash;
-    const base = gate.resolved
+    const dim = gate.resolved && flash <= 0;
+    const body = dim
         ? '#3a4650'
         : gate.good
-            ? (gate.kind === 'mul' ? '#2f6f9e' : '#2f8f5b')
-            : (gate.kind === 'div' ? '#8a3d6b' : '#a04545');
-    const edge = gate.resolved ? '#232b31'
-        : chosenSide ? '#e8f7ff'
-            : approaching ? '#9ec8d4' : '#0d1c24';
+            ? (gate.kind === 'mul' ? '#2a6a9c' : '#248a52')
+            : (gate.kind === 'div' ? '#7a3560' : '#8e3a3a');
+    const hi = dim ? '#4a5660' : (gate.good ? '#5ecf8a' : '#d07070');
+    const shade = dim ? '#2a3238' : (gate.good ? '#145a38' : '#5a2020');
+    const outline = dim ? '#1a2228'
+        : chosenSide ? '#f2f2f2'
+            : approaching ? '#c8d8e0' : '#0a1014';
+    const brickW = TILE_W - 4;
+    const brickH = GATE_H;
+    const midX = (colToX(cols[0]) + colToX(cols[cols.length - 1])) / 2;
 
-    for (let i = 0; i < lanes.length; i++) {
-        const lane = lanes[i];
-        const pop = flash > 0 ? 1 + flash * 0.35 : 1;
+    // Pixel frame rails (hard edges, no radius).
+    cmds.push({
+        id: `gate-rail-top-${gate.id}`, kind: 'rect',
+        x: midX, y: y - brickH * 0.5 - 3,
+        w: TILE_W * 5 - 2, h: 3, fill: outline, radius: 0,
+    });
+    cmds.push({
+        id: `gate-rail-bot-${gate.id}`, kind: 'rect',
+        x: midX, y: y + brickH * 0.5 + 3,
+        w: TILE_W * 5 - 2, h: 3, fill: outline, radius: 0,
+    });
+
+    for (let i = 0; i < cols.length; i++) {
+        const col = cols[i];
+        const x = colToX(col);
+        const pop = flash > 0 ? 1 + flash * 0.2 : 1;
+        const bw = brickW * pop;
+        const bh = brickH * pop;
+        // Outline block
         cmds.push({
-            id: `gate-brick-${gate.id}-${lane}`, kind: 'rect',
-            x: laneToX(lane), y,
-            w: (CELL_W - 2) * pop, h: GATE_H * pop,
-            fill: base,
-            stroke: edge,
-            line: chosenSide || flash > 0 ? 2 : 1,
-            radius: 2,
-            alpha: gate.resolved && flash <= 0 ? 0.55 : 1,
+            id: `gate-out-${gate.id}-${col}`, kind: 'rect',
+            x, y, w: bw + 4, h: bh + 4, fill: outline, radius: 0,
         });
-        if (!gate.resolved || flash > 0) {
+        // Body
+        cmds.push({
+            id: `gate-body-${gate.id}-${col}`, kind: 'rect',
+            x, y, w: bw, h: bh, fill: body, radius: 0,
+        });
+        // Top highlight + bottom shade (chunky pixel bevel)
+        cmds.push({
+            id: `gate-hi-${gate.id}-${col}`, kind: 'rect',
+            x, y: y - bh * 0.5 + 2, w: bw - 4, h: 3, fill: hi, radius: 0,
+        });
+        cmds.push({
+            id: `gate-sh-${gate.id}-${col}`, kind: 'rect',
+            x, y: y + bh * 0.5 - 2, w: bw - 4, h: 3, fill: shade, radius: 0,
+        });
+        // Mortar notch between bricks
+        if (i < cols.length - 1) {
             cmds.push({
-                id: `gate-inset-${gate.id}-${lane}`, kind: 'rect',
-                x: laneToX(lane), y: y - GATE_H * 0.22,
-                w: CELL_W * 0.55, h: 4,
-                fill: '#ffffff', alpha: 0.18, radius: 1,
+                id: `gate-mortar-${gate.id}-${col}`, kind: 'rect',
+                x: x + TILE_W * 0.5 - 1, y, w: 2, h: bh + 2, fill: outline, radius: 0,
             });
         }
     }
 
-    const mid = (lanes[0] + lanes[lanes.length - 1]) / 2;
     cmds.push({
         id: `gate-label-${gate.id}`, kind: 'text',
-        x: laneToX(mid), y,
+        x: midX, y,
         text: gate.label,
-        size: flash > 0 ? 26 : 22,
+        size: flash > 0 ? 24 : 20,
         bold: true,
         fill: '#ffffff',
     });

@@ -108,7 +108,8 @@ export const ZG_RULES = Object.freeze({
     maxWeaponTier: 2,
     chaseLaneInterval: 0.22,
     laneEase: 14,
-    leftLaneMax: 2,
+    /** Lanes 0–1 → left gate (cols 1–5); lanes 2–4 → right gate (cols 6–10). */
+    leftLaneMax: 1,
     defaultCrateHp: 20,
 });
 
