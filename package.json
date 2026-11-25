@@ -5,7 +5,8 @@
   "scripts": {
     "preview": "node tools/preview.cjs",
     "typecheck": "node tools/typecheck.cjs",
-    "test": "node --test tests/gameplay.cjs"
+    "test": "node --test tests/gameplay.cjs tests/zombie-gate.cjs",
+    "test:zombie": "node --test tests/zombie-gate.cjs"
   },
   "_sourceId": "c30b28da-749e-479b-bcb6-cecd8d7be9e3",
   "creator": {

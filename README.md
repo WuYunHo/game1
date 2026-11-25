@@ -27,7 +27,10 @@ Cocos Creator **3.8.7** / TypeScript / 720 × 1280 竖屏休闲游戏。
 npm run preview
 ```
 
-打开 http://127.0.0.1:4173 。这个预览只用于快速试玩和画面检查，正式游戏仍由 Cocos 运行。
+- 旧版肥鱼冲关：http://127.0.0.1:4173/
+- 新模式「向僵尸开炮 · 前期」：http://127.0.0.1:4173/zombie-gate
+
+预览只用于快速试玩和画面检查，正式游戏仍由 Cocos 运行。
 辅助脚本优先使用本地 TypeScript，否则使用 Creator 自带编译器。首次使用前需在 Creator 打开项目一次，以生成 `temp/declarations`。
 
 ```sh
@@ -37,11 +40,20 @@ npm test
 
 测试覆盖增益门单次结算、鱼群进化、碰撞扣员、闪避、首领胜负、重开、恢复帧保护、密集波次，以及场景内部引用和 2D 摄像机配置。
 
+## 策划案
+
+转型设计（向僵尸开炮式前期战斗 + 格子地图空间模型）见：
+
+- [`docs/design/`](./docs/design/README.md)
+
 ## 结构
 
 - `assets/scripts/FishRushModel.ts`：不依赖引擎的鱼群、波次、关卡和胜负规则。
 - `assets/scripts/FishRushPresentation.ts`：海岛、水道、棕榈树、波纹、增益门、角色编队、HUD 和面板的 2D 画面描述。
 - `assets/scripts/FishRushGame.ts`：Cocos 输入、SpriteFrame 加载，以及 Sprite / Graphics / Label 渲染适配。
+- `assets/scripts/ZombieGateLevel.ts` / `ZombieGateModel.ts` / `ZombieGatePresentation.ts` / `ZombieGateGame.ts`：新模式关卡、规则、画面描述与 Cocos 适配；`main.scene` 已挂 `ZombieGateGame`。
+- `assets/scripts/FishRushGame.ts`：旧版肥鱼冲关适配（保留，未挂主场景）。
+- `tests/zombie-gate.cjs`：新模式规则单测。
 - `FishRushGame` 使用按文本、Graphics、鱼精灵、飞飞鼠精灵分类的节点池；波次和鱼群变化只回收复用节点，不在每帧销毁重建，也不再 JSON 序列化每条绘制命令。
 - 连续的矩形、圆形和多边形会合并到 Graphics 批次节点；鱼群使用 16 进化单位，避免大量 Sprite Draw Call，同时保留每个进化单位的角色精灵细节。
 - Cocos 适配层在等待界面只提交一次绘制；游戏进行时动态世界按引擎 60Hz 更新，地面、飞门和飞飞鼠共享同一时间轴。

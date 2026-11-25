@@ -124,6 +124,7 @@ test('Creator scene has valid local references and only an orthographic UI camer
     }visit(scene);
     assert.equal(scene.filter(x=>x.__type__==='cc.Camera').length,1);
     assert.equal(scene.find(x=>x.__type__==='cc.Camera')._projection,0);
-    assert.ok(scene.some(x=>x.__type__==='a7f167reP5AvJBHQEXC3UCp'));
+    assert.ok(scene.some(x=>x.__type__==='e4f5aa3yNlAEp7wEjRWeJAS'),'Canvas should mount ZombieGateGame');
+    assert.ok(scene.some(x=>x.__type__==='cc.Widget'),'Canvas should have Widget for screen fit');
     assert.ok(!scene.some(x=>/MeshRenderer|Light$|PrefabInstance/.test(x.__type__)));
 });

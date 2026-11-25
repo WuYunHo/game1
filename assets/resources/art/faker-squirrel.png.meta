@@ -135,7 +135,7 @@
                      "fixAlphaTransparencyArtifacts":  true,
                      "redirect":  "7900fd2d-0b65-415a-86a4-b09351e726a6@6c48a",
                      "compressSettings":  {
-                                              "useCompressTexture":  true
+                                              "useCompressTexture":  false
                                           }
                  }
 }
