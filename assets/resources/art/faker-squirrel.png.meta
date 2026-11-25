@@ -17,8 +17,8 @@
                                    "userData":  {
                                                     "wrapModeS":  "clamp-to-edge",
                                                     "wrapModeT":  "clamp-to-edge",
-                                                    "minfilter":  "linear",
-                                                    "magfilter":  "linear",
+                                                    "minfilter":  "nearest",
+                                                    "magfilter":  "nearest",
                                                     "mipfilter":  "none",
                                                     "anisotropy":  0,
                                                     "isUuid":  true,
@@ -47,10 +47,10 @@
                                                     "offsetY":  0,
                                                     "trimX":  0,
                                                     "trimY":  0,
-                                                    "width":  1254,
-                                                    "height":  1254,
-                                                    "rawWidth":  1254,
-                                                    "rawHeight":  1254,
+                                                    "width":  256,
+                                                    "height":  256,
+                                                    "rawWidth":  256,
+                                                    "rawHeight":  256,
                                                     "borderTop":  0,
                                                     "borderBottom":  0,
                                                     "borderLeft":  0,
@@ -62,17 +62,17 @@
                                                     "meshType":  0,
                                                     "vertices":  {
                                                                      "rawPosition":  [
-                                                                                         -627,
-                                                                                         -627,
+                                                                                         -128,
+                                                                                         -128,
                                                                                          0,
-                                                                                         627,
-                                                                                         -627,
+                                                                                         128,
+                                                                                         -128,
                                                                                          0,
-                                                                                         -627,
-                                                                                         627,
+                                                                                         -128,
+                                                                                         128,
                                                                                          0,
-                                                                                         627,
-                                                                                         627,
+                                                                                         128,
+                                                                                         128,
                                                                                          0
                                                                                      ],
                                                                      "indexes":  [
@@ -85,12 +85,12 @@
                                                                                  ],
                                                                      "uv":  [
                                                                                 0,
-                                                                                1254,
-                                                                                1254,
-                                                                                1254,
+                                                                                256,
+                                                                                256,
+                                                                                256,
                                                                                 0,
                                                                                 0,
-                                                                                1254,
+                                                                                256,
                                                                                 0
                                                                             ],
                                                                      "nuv":  [
@@ -104,13 +104,13 @@
                                                                                  1
                                                                              ],
                                                                      "minPos":  [
-                                                                                    -627,
-                                                                                    -627,
+                                                                                    -128,
+                                                                                    -128,
                                                                                     0
                                                                                 ],
                                                                      "maxPos":  [
-                                                                                    627,
-                                                                                    627,
+                                                                                    128,
+                                                                                    128,
                                                                                     0
                                                                                 ]
                                                                  },

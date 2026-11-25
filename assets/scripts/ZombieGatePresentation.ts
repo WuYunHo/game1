@@ -299,13 +299,14 @@ function drawWeaponCrate(cmds: DrawCommand[], crate: WeaponCrateEntity, cameraY:
 }
 
 function drawEnemy(cmds: DrawCommand[], enemy: EnemyEntity, cameraY: number) {
-    const x = laneToX(enemy.displayLane);
-    const y = worldToScreenY(enemy.y, cameraY);
+    const x = Math.round(laneToX(enemy.displayLane) + enemy.ox * LANE_W);
+    const y = Math.round(worldToScreenY(enemy.y, cameraY));
     if (y < -60 || y > H + 60) return;
-    const size = enemy.kind === 'tank' ? 70 : 56;
+    // Even pixel sizes keep nearest-neighbor sprites blocky.
+    const size = enemy.kind === 'tank' ? 64 : 48;
     cmds.push({
         id: `enemy-shadow-${enemy.id}`, kind: 'ellipse',
-        x, y: y + size * 0.35, w: size * 0.7, h: 14, fill: '#000000', alpha: 0.35,
+        x, y: y + size * 0.35, w: size * 0.7, h: 12, fill: '#000000', alpha: 0.35,
     });
     cmds.push({
         id: `enemy-${enemy.id}`, kind: 'image',
@@ -315,7 +316,7 @@ function drawEnemy(cmds: DrawCommand[], enemy: EnemyEntity, cameraY: number) {
         cmds.push({
             id: `enemy-flash-${enemy.id}`, kind: 'rect',
             x, y, w: size * 0.9, h: size * 0.9,
-            fill: '#ffffff', alpha: Math.min(0.55, enemy.hitFlash * 4), radius: 8,
+            fill: '#ffffff', alpha: Math.min(0.55, enemy.hitFlash * 4), radius: 2,
         });
     }
     if (enemy.state === 'chase') {
@@ -372,11 +373,11 @@ function drawSquad(cmds: DrawCommand[], model: ZombieGateModel, cameraY: number)
     });
 
     for (let i = 0; i < visual; i++) {
-        const ox = ((i % 3) - 1) * 18;
-        const oy = -Math.floor(i / 3) * 16;
+        const ox = ((i % 3) - 1) * 16;
+        const oy = -Math.floor(i / 3) * 14;
         cmds.push({
             id: `unit-${i}`, kind: 'image',
-            x: x + ox, y: y + oy, w: 52, h: 52, asset: 'fish',
+            x: Math.round(x + ox), y: Math.round(y + oy), w: 48, h: 48, asset: 'fish',
         });
     }
     if (model.unitCount > 8) {

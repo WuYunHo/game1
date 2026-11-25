@@ -17,7 +17,7 @@ const play = () => {
 };
 
 const enemy = (partial = {}) => ({
-    id: 1, lane: 2, displayLane: 2, y: 4, hp: 3, maxHp: 3, touchCost: 1, speed: 1.5,
+    id: 1, lane: 2, displayLane: 2, y: 4, ox: 0, hp: 3, maxHp: 3, touchCost: 1, speed: 1.5,
     state: 'idle', kind: 'normal', laneStepTimer: 0, hitFlash: 0,
     ...partial,
 });
@@ -131,6 +131,21 @@ test('level spawns map-fixed weapon crates with hp 20 and width-1 lane', () => {
     assert.equal(crate.maxHp, 20);
     assert.ok(crate.lane >= 0 && crate.lane <= 4);
     assert.equal(crate.claimed, false);
+});
+
+test('level packs dense staggered fly-mice including same-lane stacks', () => {
+    const m = play();
+    assert.ok(m.enemies.length >= 90, `expected dense pack, got ${m.enemies.length}`);
+    const staggered = m.enemies.filter(e => e.ox !== 0 || Math.abs(e.y % 1) > 0.001);
+    assert.ok(staggered.length >= 40, 'expected many dx/dy stack offsets');
+    const byLaneY = new Map();
+    for (const e of m.enemies) {
+        const key = `${e.lane}:${e.y.toFixed(2)}`;
+        byLaneY.set(key, (byLaneY.get(key) || 0) + 1);
+    }
+    // Same logical lane can host multiple flies (distinct y via dy).
+    const laneCounts = [0, 1, 2, 3, 4].map(lane => m.enemies.filter(e => e.lane === lane).length);
+    assert.ok(Math.min(...laneCounts) >= 8, 'every lane should feel crowded');
 });
 
 test('weapon crate takes squad damage n per pellet hit', () => {

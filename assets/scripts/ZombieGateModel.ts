@@ -48,6 +48,8 @@ export type EnemyEntity = {
     lane: number;
     displayLane: number;
     y: number;
+    /** Visual sub-lane offset in lane widths for staggered stacks. */
+    ox: number;
     hp: number;
     maxHp: number;
     touchCost: number;
@@ -280,7 +282,8 @@ export class ZombieGateModel {
                     id: this.nextId++,
                     lane: spawn.lane,
                     displayLane: spawn.lane,
-                    y: row.row,
+                    y: row.row + (spawn.dy ?? 0),
+                    ox: spawn.dx ?? 0,
                     hp: stats.hp,
                     maxHp: stats.hp,
                     touchCost: stats.touchCost,

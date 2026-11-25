@@ -78,7 +78,10 @@ export class ZombieGateGame extends Component {
         return new Promise((resolve, reject) => {
             resources.load(`${basePath}/spriteFrame`, SpriteFrame, (sfErr, frame) => {
                 if (!sfErr && frame) {
-                    if (this.isValid) this.frames[key] = frame;
+                    if (this.isValid) {
+                        this.applyNearestFilter(frame);
+                        this.frames[key] = frame;
+                    }
                     resolve();
                     return;
                 }
@@ -90,6 +93,7 @@ export class ZombieGateGame extends Component {
                     if (!this.isValid) { resolve(); return; }
                     const texture = new Texture2D();
                     texture.image = image;
+                    texture.setFilters(Texture2D.Filter.NEAREST, Texture2D.Filter.NEAREST);
                     const created = new SpriteFrame();
                     created.texture = texture;
                     this.frames[key] = created;
@@ -97,6 +101,14 @@ export class ZombieGateGame extends Component {
                 });
             });
         });
+    }
+
+    /** Keep character art blocky (Soul Knight / pixel look). */
+    private applyNearestFilter(frame: SpriteFrame) {
+        const texture = frame.texture as Texture2D | null;
+        if (texture && typeof texture.setFilters === 'function') {
+            texture.setFilters(Texture2D.Filter.NEAREST, Texture2D.Filter.NEAREST);
+        }
     }
 
     update(dt: number) {

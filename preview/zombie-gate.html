@@ -41,7 +41,8 @@ function draw(c) {
     ctx.font = `${c.bold ? '700' : '400'} ${c.size}px Arial,"Microsoft YaHei",sans-serif`;
     ctx.fillText(c.text, x, y);
   } else if (c.kind === 'image') {
-    if (images[c.asset]) ctx.drawImage(images[c.asset], x - w / 2, y - h / 2, w, h);
+    ctx.imageSmoothingEnabled = false;
+    if (images[c.asset]) ctx.drawImage(images[c.asset], Math.round(x - w / 2), Math.round(y - h / 2), Math.round(w), Math.round(h));
     else {
       ctx.beginPath();
       ctx.ellipse(x, y, w / 2, h / 2, 0, 0, Math.PI * 2);
