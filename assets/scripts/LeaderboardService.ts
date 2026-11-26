@@ -28,9 +28,9 @@ export class LeaderboardService {
         context?.postMessage({ type: 'leaderboard', key: LeaderboardService.scoreKey });
         const self = this.readLocalBest();
         return Promise.resolve([
-            { name: 'YOU', score: self, self: true },
-            { name: 'BLUE FIN', score: Math.max(120, self - 18) },
-            { name: 'CAPTAIN MOUSE', score: Math.max(90, self - 41) },
+            { name: '我', score: self, self: true },
+            { name: '蓝鳍', score: Math.max(120, self - 18) },
+            { name: '鼠船长', score: Math.max(90, self - 41) },
         ]);
     }
 }

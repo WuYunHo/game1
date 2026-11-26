@@ -3,6 +3,13 @@ import {
     ZombieGateModel, ZG_RULES, WEAPONS, sideForCol,
     type BurstPixel, type GateEntity, type EnemyEntity, type WeaponCrateEntity, type Feedback, type ShotEvent,
 } from './ZombieGateModel';
+import {
+    LB_UI, leaderboardButtonHit, leaderboardCloseHit, leaderboardPanelCenter,
+    type LeaderboardRowView,
+} from './LeaderboardUi';
+
+export type { LeaderboardRowView };
+export { leaderboardButtonHit, leaderboardCloseHit };
 
 export type DrawCommand = {
     id: string;
@@ -146,7 +153,16 @@ export function startButtonHit(): { x0: number; x1: number; y0: number; y1: numb
     return { x0: 180, x1: 540, y0: cy - 43, y1: cy + 43, cx: W / 2, cy };
 }
 
-export function composeZombieGate(model: ZombieGateModel, hover: { x: number; y: number } | null = null): DrawCommand[] {
+export type LeaderboardViewState = {
+    open: boolean;
+    rows: LeaderboardRowView[];
+};
+
+export function composeZombieGate(
+    model: ZombieGateModel,
+    hover: { x: number; y: number } | null = null,
+    leaderboard: LeaderboardViewState = { open: false, rows: [] },
+): DrawCommand[] {
     const cmds: DrawCommand[] = [];
     const cameraY = cameraForPlayer(model.playerY);
     const playerSide = sideForCol(model.playerCol);
@@ -184,7 +200,7 @@ export function composeZombieGate(model: ZombieGateModel, hover: { x: number; y:
 
     for (const f of model.feedback) drawFeedback(cmds, f, cameraY);
 
-    drawHud(cmds, model);
+    drawHud(cmds, model, hover, leaderboard.open);
 
     if (model.impact > 0) {
         cmds.push({
@@ -196,9 +212,11 @@ export function composeZombieGate(model: ZombieGateModel, hover: { x: number; y:
     if (model.phase === 'intro') {
         ensureIntroBurst(model);
         drawIntroBurst(cmds, model);
-    } else if (model.phase !== 'playing') {
+    } else if (model.phase !== 'playing' && !leaderboard.open) {
         drawPanel(cmds, model, hover);
     }
+
+    if (leaderboard.open) drawLeaderboard(cmds, leaderboard.rows, hover);
 
     return cmds;
 }
@@ -622,21 +640,41 @@ function drawFeedback(cmds: DrawCommand[], f: Feedback, cameraY: number) {
     });
 }
 
-function drawHud(cmds: DrawCommand[], model: ZombieGateModel) {
+function drawHud(
+    cmds: DrawCommand[],
+    model: ZombieGateModel,
+    hover: { x: number; y: number } | null,
+    boardOpen: boolean,
+) {
     const weapon = model.weapon;
-    // Three separate plaques — matches SK segmented top UI, not one rounded bar.
-    pushPixelPlaque(cmds, 'hudUnits', 120, 48, 168, 52, '#2b3540', '#7a8894');
-    pushHudText(cmds, 'hudUnitsText', 120, 48, `人数 ${model.unitCount}`, 24, '#fff6e8');
+    // Segmented top UI + leaderboard entry (SK plaques, not rounded pills).
+    pushPixelPlaque(cmds, 'hudUnits', 108, 48, 150, 52, '#2b3540', '#7a8894');
+    pushHudText(cmds, 'hudUnitsText', 108, 48, `人数 ${model.unitCount}`, 22, '#fff6e8');
 
-    pushPixelPlaque(cmds, 'hudWeapon', 360, 48, 220, 52, '#243038', weapon.color);
-    pushHudText(cmds, 'hudWeaponName', 360, 36, weapon.name, 22, weapon.color);
+    pushPixelPlaque(cmds, 'hudWeapon', 320, 48, 200, 52, '#243038', weapon.color);
+    pushHudText(cmds, 'hudWeaponName', 320, 36, weapon.name, 20, weapon.color);
     cmds.push({
         id: 'hudWeaponMeta', kind: 'text',
-        x: 360, y: 58, text: `伤${weapon.damage} 弹${weapon.pellets}`, size: 14, bold: true, fill: '#d8e4ec',
+        x: 320, y: 58, text: `伤${weapon.damage} 弹${weapon.pellets}`, size: 13, bold: true, fill: '#d8e4ec',
     });
 
-    pushPixelPlaque(cmds, 'hudTime', 600, 48, 140, 52, '#2b3540', '#7a8894');
-    pushHudText(cmds, 'hudTimeText', 600, 48, `${Math.ceil(model.timeLeft)}s`, 24, '#b4ebf4');
+    pushPixelPlaque(cmds, 'hudTime', 520, 48, 120, 52, '#2b3540', '#7a8894');
+    pushHudText(cmds, 'hudTimeText', 520, 48, `${Math.ceil(model.timeLeft)}s`, 22, '#b4ebf4');
+
+    const boardBtn = leaderboardButtonHit();
+    const boardHot = !!(hover && hover.x >= boardBtn.x0 && hover.x <= boardBtn.x1
+        && hover.y >= boardBtn.y0 && hover.y <= boardBtn.y1);
+    pushPixelPlaque(
+        cmds,
+        'hudBoard',
+        boardBtn.cx,
+        boardBtn.cy,
+        boardHot || boardOpen ? LB_UI.buttonW + 6 : LB_UI.buttonW,
+        boardHot || boardOpen ? LB_UI.buttonH + 4 : LB_UI.buttonH,
+        boardOpen ? '#2a7f94' : '#2b3540',
+        boardHot ? '#7fd0e0' : '#7a8894',
+    );
+    pushHudText(cmds, 'hudBoardText', boardBtn.cx, boardBtn.cy, '排行', 18, '#fff6e8');
 
     // Chunky outlined progress rail.
     const progress = Math.min(1, model.elapsed / ZG_RULES.duration);
@@ -705,4 +743,83 @@ function drawPanel(
         30,
         '#ffffff',
     );
+}
+
+/** Friend board modal — same SK plaque language as HUD / start panel. */
+function drawLeaderboard(
+    cmds: DrawCommand[],
+    rows: LeaderboardRowView[],
+    hover: { x: number; y: number } | null,
+) {
+    const { x, y } = leaderboardPanelCenter(H);
+    cmds.push({
+        id: 'lbScrim', kind: 'rect',
+        x: W / 2, y: H / 2, w: W, h: H, fill: '#0a1218', alpha: 0.55, radius: 0,
+    });
+    pushPixelPlaque(cmds, 'lbPanel', x, y, LB_UI.panelW, LB_UI.panelH, '#1a242c', '#6a7a88');
+    cmds.push({
+        id: 'lbInner', kind: 'rect',
+        x, y, w: LB_UI.panelW - 28, h: LB_UI.panelH - 28, fill: '#121820', radius: 0,
+    });
+    pushHudText(cmds, 'lbTitle', x, y + LB_UI.titleOffsetY, '好友排行榜', 30, '#fff6e8');
+    cmds.push({
+        id: 'lbSub', kind: 'text',
+        x, y: y + LB_UI.titleOffsetY + 34, text: '微信好友 · 最高分', size: 16, bold: true, fill: '#8a9aa4',
+    });
+
+    const list = rows.slice(0, LB_UI.maxRows);
+    if (list.length === 0) {
+        pushHudText(cmds, 'lbEmpty', x, y, '暂无好友数据', 20, '#7a8894');
+    } else {
+        list.forEach((row, index) => {
+            const ry = y + LB_UI.listStartOffsetY + index * LB_UI.rowGap;
+            const fill = row.self ? '#243840' : '#1c2830';
+            const hi = row.self ? '#3aa0b8' : '#4a5a64';
+            pushPixelPlaque(cmds, `lbRow${index}`, x, ry, LB_UI.rowW, LB_UI.rowH, fill, hi);
+            pushHudText(
+                cmds,
+                `lbRank${index}`,
+                x - 170,
+                ry,
+                `${index + 1}`,
+                20,
+                row.self ? '#7fd0e0' : '#c8d0d8',
+            );
+            pushHudText(
+                cmds,
+                `lbName${index}`,
+                x - 40,
+                ry,
+                row.name,
+                18,
+                row.self ? '#fff6e8' : '#d8e4ec',
+            );
+            pushHudText(
+                cmds,
+                `lbScore${index}`,
+                x + 160,
+                ry,
+                String(row.score),
+                20,
+                row.self ? '#ffe566' : '#fff6e8',
+            );
+        });
+    }
+
+    const close = leaderboardCloseHit(H);
+    const hot = !!(hover && hover.x >= close.x0 && hover.x <= close.x1
+        && hover.y >= close.y0 && hover.y <= close.y1);
+    cmds.push({
+        id: 'lbCloseOut', kind: 'rect',
+        x: close.cx, y: close.cy, w: LB_UI.closeW + 8, h: LB_UI.closeH + 8, fill: '#141414', radius: 0,
+    });
+    cmds.push({
+        id: 'lbClose', kind: 'rect',
+        x: close.cx, y: close.cy, w: LB_UI.closeW, h: LB_UI.closeH, fill: hot ? '#3aa0b8' : '#2a7f94', radius: 0,
+    });
+    cmds.push({
+        id: 'lbCloseHi', kind: 'rect',
+        x: close.cx, y: close.cy - 30, w: LB_UI.closeW - 16, h: 4, fill: '#7fd0e0', radius: 0,
+    });
+    pushHudText(cmds, 'lbCloseText', close.cx, close.cy, '关闭', 26, '#ffffff');
 }

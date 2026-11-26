@@ -193,9 +193,10 @@ export function composeGame(m: FishRushModel, hover: HoverPoint = null, leaderbo
     text('chapter', 'ISLAND ' + String(m.stage).padStart(2, '0'), 360, 39, 18, '#5e8c94');
     rect('scorePill', 570, 58, 98, 46, '#ffdf6f', 18, N, 3);
     text('score', String(m.score), 570, 58, 22, N);
-    const boardHover = isHover(680, 58, 76, 46);
-    rect('leaderboardButton', 680, 58, boardHover ? 82 : 76, boardHover ? 50 : 46, boardHover ? '#ffef9a' : '#ffe49a', 18, N, 3);
-    text('leaderboardIcon', 'TOP', 680, 58, 16, N);
+    const boardHover = isHover(680, 58, 72, 52);
+    rect('leaderboardButtonOut', 680, 58, boardHover ? 80 : 76, boardHover ? 58 : 54, '#141414', 0);
+    rect('leaderboardButton', 680, 58, boardHover ? 72 : 68, boardHover ? 52 : 48, boardHover ? '#2a7f94' : '#2b3540', 0);
+    text('leaderboardIcon', '排行', 680, 58, 16, '#fff6e8');
     // Chunky candy-like progress bar: dark shell, thick fill and a bright cap.
     rect('progressBack', 360, 101, 624, 28, '#173f55', 14, N, 3);
     const progress = Math.max(0.02, Math.min(1, m.elapsed / 60));
@@ -217,18 +218,26 @@ export function composeGame(m: FishRushModel, hover: HoverPoint = null, leaderbo
         text('hint', 'SWIPE LEFT / RIGHT', 360, 1230, 18, '#5e8c94', false);
     }
     if (leaderboard.open) {
-        rect('leaderboardScrim', 360, 640, 720, 1280, '#153d5966', 0);
-        rect('leaderboardPanel', 360, 640, 520, 620, '#fff6dc', 34, N, 5);
-        text('leaderboardTitle', 'FRIENDS', 360, 400, 34, N);
+        // Shared Soul Knight board chrome (matches ZombieGate / openDataContext).
+        rect('leaderboardScrim', 360, 640, 720, 1280, '#0a12188c', 0);
+        rect('lbOut', 360, 620, 528, 568, '#141414', 0);
+        rect('leaderboardPanel', 360, 620, 520, 560, '#1a242c', 0);
+        rect('lbInner', 360, 620, 492, 532, '#121820', 0);
+        rect('lbHi', 360, 352, 500, 3, '#6a7a88', 0);
+        text('leaderboardTitle', '好友排行榜', 360, 410, 30, '#fff6e8');
+        text('leaderboardSub', '微信好友 · 最高分', 360, 444, 16, '#8a9aa4', false);
         leaderboard.rows.slice(0, 5).forEach((row, index) => {
-            const y = 500 + index * 62;
-            rect('leaderRow' + index, 360, y, 420, 48, row.self ? '#b8f2db' : '#f6e8b8', 18, N, 2);
-            text('leaderName' + index, String(index + 1) + '  ' + row.name, 270, y, 18, N, false);
-            text('leaderScore' + index, String(row.score), 490, y, 20, N);
+            const y = 510 + index * 58;
+            rect('leaderRowOut' + index, 360, y, 448, 54, '#141414', 0);
+            rect('leaderRow' + index, 360, y, 440, 48, row.self ? '#243840' : '#1c2830', 0);
+            rect('leaderRowHi' + index, 360, y - 20, 432, 3, row.self ? '#3aa0b8' : '#4a5a64', 0);
+            text('leaderName' + index, String(index + 1) + '  ' + row.name, 250, y, 18, row.self ? '#fff6e8' : '#d8e4ec', false);
+            text('leaderScore' + index, String(row.score), 500, y, 20, row.self ? '#ffe566' : '#fff6e8');
         });
-        const closeHover = isHover(360, 875, 260, 64);
-        rect('leaderboardClose', 360, 875, closeHover ? 274 : 260, closeHover ? 70 : 64, closeHover ? '#65e7c3' : '#39d7b6', 24, N, 4);
-        text('leaderboardCloseText', 'CLOSE', 360, 875, 22, N);
+        const closeHover = isHover(360, 830, 280, 72);
+        rect('leaderboardCloseOut', 360, 830, 288, 80, '#141414', 0);
+        rect('leaderboardClose', 360, 830, closeHover ? 286 : 280, closeHover ? 76 : 72, closeHover ? '#3aa0b8' : '#2a7f94', 0);
+        text('leaderboardCloseText', '关闭', 360, 830, 24, '#ffffff');
     }
     return c;
 }

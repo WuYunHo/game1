@@ -7,9 +7,10 @@ import {
 import { ZombieGateModel } from './ZombieGateModel';
 import {
     composeZombieGate, DrawCommand, getPlayHeight, colFromX,
-    setPlayHeight, startButtonHit, W,
+    leaderboardCloseHit, setPlayHeight, startButtonHit, W,
 } from './ZombieGatePresentation';
-import { LeaderboardService } from './LeaderboardService';
+import { LeaderboardRow, LeaderboardService } from './LeaderboardService';
+import { LB_UI } from './LeaderboardUi';
 
 const { ccclass } = _decorator;
 type DrawNode = {
@@ -40,6 +41,13 @@ export class ZombieGateGame extends Component {
     private lastPhase = this.model.phase;
     private hover: { x: number; y: number } | null = null;
     private leaderboard = new LeaderboardService();
+    private leaderboardOpen = false;
+    private leaderboardRows: LeaderboardRow[] = [];
+    private subContextNode: Node | null = null;
+    private subContextShowTimer: ReturnType<typeof setTimeout> | null = null;
+    private lbHitNode: Node | null = null;
+    private lbCloseHitNode: Node | null = null;
+    private lbToggleAt = 0;
     private playHeight = 1280;
 
     onLoad() {
@@ -47,6 +55,7 @@ export class ZombieGateGame extends Component {
         view.setDesignResolutionSize(720, 1280, ResolutionPolicy.FIXED_WIDTH);
         this.syncPlaySize();
         this.ensureCanvasWidget();
+        this.ensureLeaderboardHitNodes();
         view.on('canvas-resize', this.onCanvasResize, this);
         input.on(Input.EventType.TOUCH_START, this.onTouchStart, this);
         input.on(Input.EventType.TOUCH_MOVE, this.onTouchMove, this);
@@ -73,6 +82,7 @@ export class ZombieGateGame extends Component {
     private onCanvasResize() {
         this.syncPlaySize();
         this.ensureCanvasWidget();
+        this.layoutLeaderboardHitNodes();
         this.renderDirty = true;
     }
 
@@ -101,11 +111,81 @@ export class ZombieGateGame extends Component {
         widget.right = 0;
         widget.alignMode = Widget.AlignMode.ON_WINDOW_RESIZE;
         widget.updateAlignment();
+        // Widget can clobber size — re-assert design size used by compose + hit tests.
+        if (ui) ui.setContentSize(W, this.playHeight);
+        this.layoutLeaderboardHitNodes();
     }
 
-    /** UILocation is bottom-left origin → convert to top-left compose coords. */
-    private toUiY(uiY: number): number {
-        return this.playHeight - uiY;
+    /** UILocation is bottom-left / Y-up → compose top-left / Y-down. */
+    private pointerToCompose(uiLoc: { x: number; y: number }): { x: number; y: number } {
+        const h = this.node.getComponent(UITransform)?.contentSize.height || this.playHeight;
+        return { x: uiLoc.x, y: h - uiLoc.y };
+    }
+
+    /** Real UI hit targets so the TOP-right plaque receives Cocos node events. */
+    private ensureLeaderboardHitNodes() {
+        if (!this.lbHitNode?.isValid) {
+            this.lbHitNode = this.makeHitNode('LbOpenHit', LB_UI.buttonW + 36, LB_UI.buttonH + 36, () => {
+                void this.toggleLeaderboard();
+            });
+        }
+        if (!this.lbCloseHitNode?.isValid) {
+            this.lbCloseHitNode = this.makeHitNode('LbCloseHit', LB_UI.closeW + 24, LB_UI.closeH + 24, () => {
+                if (this.leaderboardOpen) this.closeLeaderboard();
+            });
+            this.lbCloseHitNode.active = false;
+        }
+        this.layoutLeaderboardHitNodes();
+    }
+
+    private makeHitNode(name: string, w: number, h: number, onClick: () => void): Node {
+        const node = new Node(name);
+        node.layer = Layers.Enum.UI_2D;
+        const ui = node.addComponent(UITransform);
+        ui.setContentSize(w, h);
+        // Opaque-enough Graphics so UI hit-testing accepts the node.
+        const g = node.addComponent(Graphics);
+        g.fillColor = new Color(255, 255, 255, 1);
+        g.rect(-w * 0.5, -h * 0.5, w, h);
+        g.fill();
+        node.on(Node.EventType.TOUCH_END, (e: EventTouch) => {
+            e.propagationStopped = true;
+            onClick();
+        }, this);
+        node.on(Node.EventType.MOUSE_UP, (e: EventMouse) => {
+            if (e.getButton() !== 0) return;
+            e.propagationStopped = true;
+            onClick();
+        }, this);
+        this.node.addChild(node);
+        return node;
+    }
+
+    private layoutLeaderboardHitNodes() {
+        const h = this.playHeight;
+        if (this.lbHitNode?.isValid) {
+            // Compose (buttonX, buttonY) → local center-origin / Y-up.
+            this.lbHitNode.setPosition(LB_UI.buttonX - W * 0.5, h * 0.5 - LB_UI.buttonY, 0);
+            this.lbHitNode.setSiblingIndex(this.node.children.length - 1);
+            this.lbHitNode.active = true;
+        }
+        if (this.lbCloseHitNode?.isValid) {
+            const close = leaderboardCloseHit(h);
+            this.lbCloseHitNode.setPosition(close.cx - W * 0.5, h * 0.5 - close.cy, 0);
+            this.lbCloseHitNode.active = this.leaderboardOpen;
+            if (this.leaderboardOpen) this.lbCloseHitNode.setSiblingIndex(this.node.children.length - 1);
+        }
+    }
+
+    private flushLeaderboardFrame() {
+        this.renderDirty = true;
+        const commands = composeZombieGate(this.model, this.hover, {
+            open: this.leaderboardOpen,
+            rows: this.leaderboardRows,
+        });
+        this.render(commands);
+        this.renderDirty = false;
+        this.layoutLeaderboardHitNodes();
     }
 
     /** Prefer spriteFrame sub-asset; fall back to ImageAsset → Texture2D → SpriteFrame. */
@@ -149,6 +229,7 @@ export class ZombieGateGame extends Component {
     start() {
         this.syncPlaySize();
         this.ensureCanvasWidget();
+        this.ensureLeaderboardHitNodes();
         this.renderDirty = true;
     }
 
@@ -162,7 +243,7 @@ export class ZombieGateGame extends Component {
         }
         const step = Math.min(dt, 0.05);
         this.laneCool = Math.max(0, this.laneCool - step);
-        if (this.model.phase === 'playing' && this.laneCool <= 0) {
+        if (!this.leaderboardOpen && this.model.phase === 'playing' && this.laneCool <= 0) {
             if (this.left !== this.right) {
                 this.model.shiftLane(this.right ? 1 : -1);
                 this.laneCool = 0.08;
@@ -176,9 +257,12 @@ export class ZombieGateGame extends Component {
             this.renderDirty = true;
             this.readyRendered = false;
         }
-        if (this.model.phase === 'ready' && this.readyRendered && !this.renderDirty) return;
+        if (this.model.phase === 'ready' && this.readyRendered && !this.renderDirty && !this.leaderboardOpen) return;
 
-        const commands = composeZombieGate(this.model, this.hover);
+        const commands = composeZombieGate(this.model, this.hover, {
+            open: this.leaderboardOpen,
+            rows: this.leaderboardRows,
+        });
         if (!this.artReady) {
             const button = commands.find(c => c.id === 'buttonText');
             if (button) button.text = '伙伴集结中…';
@@ -188,7 +272,7 @@ export class ZombieGateGame extends Component {
         }
         this.render(commands);
         this.renderDirty = false;
-        if (this.model.phase === 'ready') this.readyRendered = true;
+        if (this.model.phase === 'ready' && !this.leaderboardOpen) this.readyRendered = true;
     }
 
     private render(commands: DrawCommand[]) {
@@ -393,7 +477,7 @@ export class ZombieGateGame extends Component {
     }
 
     private move(x: number) {
-        if (this.model.phase !== 'playing') return;
+        if (this.leaderboardOpen || this.model.phase !== 'playing') return;
         this.model.setLane(colFromX(x));
         this.renderDirty = true;
     }
@@ -404,6 +488,18 @@ export class ZombieGateGame extends Component {
     }
 
     private tap(x: number, y: number) {
+        // Fallback hit for top-right "排行" if node events are blocked by preview input.
+        if (x >= 560 && y <= 120) {
+            void this.toggleLeaderboard();
+            return;
+        }
+        if (this.leaderboardOpen) {
+            const close = leaderboardCloseHit(this.playHeight);
+            if (x >= close.x0 && x <= close.x1 && y >= close.y0 && y <= close.y1) {
+                this.closeLeaderboard();
+            }
+            return;
+        }
         if (this.model.phase === 'playing' || this.model.phase === 'intro' || !this.artReady) return;
         const btn = startButtonHit();
         if (x < btn.x0 || x > btn.x1 || y < btn.y0 || y > btn.y1) return;
@@ -412,40 +508,111 @@ export class ZombieGateGame extends Component {
         this.renderDirty = true;
     }
 
+    private async toggleLeaderboard() {
+        // Node hit + global input can both fire for one click — debounce.
+        const now = Date.now();
+        if (now - this.lbToggleAt < 250) return;
+        this.lbToggleAt = now;
+
+        if (this.leaderboardOpen) {
+            this.closeLeaderboard();
+            return;
+        }
+        this.leaderboardOpen = true;
+        this.readyRendered = false;
+        this.ensureLeaderboardHitNodes();
+        this.ensureWechatSubContext();
+        if (this.subContextShowTimer) {
+            clearTimeout(this.subContextShowTimer);
+            this.subContextShowTimer = null;
+        }
+        const best = Math.max(this.model.score, 0);
+        this.leaderboardRows = [
+            { name: '我', score: best, self: true },
+            { name: '蓝鳍', score: Math.max(120, best - 18) },
+            { name: '鼠船长', score: Math.max(90, best - 41) },
+        ];
+        this.flushLeaderboardFrame();
+        this.subContextShowTimer = setTimeout(() => {
+            if (this.leaderboardOpen && this.subContextNode?.isValid) this.subContextNode.active = true;
+            this.subContextShowTimer = null;
+        }, 250);
+        try {
+            this.leaderboardRows = await this.leaderboard.requestFriendBoard();
+        } catch {
+            /* preview keeps placeholder rows */
+        }
+        if (this.leaderboardOpen) this.flushLeaderboardFrame();
+    }
+
+    private closeLeaderboard() {
+        this.leaderboardOpen = false;
+        if (this.subContextShowTimer) {
+            clearTimeout(this.subContextShowTimer);
+            this.subContextShowTimer = null;
+        }
+        if (this.subContextNode?.isValid) this.subContextNode.active = false;
+        this.flushLeaderboardFrame();
+    }
+
+    private ensureWechatSubContext() {
+        const wx = (globalThis as unknown as { wx?: unknown }).wx;
+        if (!wx || this.subContextNode?.isValid) return;
+        const node = new Node('LeaderboardSubContext');
+        node.layer = Layers.Enum.UI_2D;
+        const ui = node.addComponent(UITransform);
+        ui.setContentSize(LB_UI.panelW, LB_UI.panelH);
+        this.node.addChild(node);
+        try { node.addComponent('cc.SubContextView' as never); } catch (error) {
+            console.warn('SubContextView unavailable until WeChat build', error);
+        }
+        node.active = false;
+        this.subContextNode = node;
+    }
+
     private onTouchStart(e: EventTouch) {
         this.pointerDown = true;
-        const p = e.getUILocation();
-        this.setHover(p.x, this.toUiY(p.y));
+        const p = this.pointerToCompose(e.getUILocation());
+        this.setHover(p.x, p.y);
         this.move(p.x);
     }
     private onTouchMove(e: EventTouch) {
-        const p = e.getUILocation();
-        this.setHover(p.x, this.toUiY(p.y));
+        const p = this.pointerToCompose(e.getUILocation());
+        this.setHover(p.x, p.y);
         if (this.pointerDown) this.move(p.x);
     }
     private onTouchEnd(e: EventTouch) {
         this.pointerDown = false;
-        const p = e.getUILocation();
-        this.tap(p.x, this.toUiY(p.y));
+        const p = this.pointerToCompose(e.getUILocation());
+        this.tap(p.x, p.y);
     }
     private onTouchCancel() { this.pointerDown = false; }
-    private onMouseDown(e: EventMouse) { if (e.getButton() === 0) this.pointerDown = true; }
+    private onMouseDown(e: EventMouse) {
+        if (e.getButton() !== 0) return;
+        this.pointerDown = true;
+        const p = this.pointerToCompose(e.getUILocation());
+        this.setHover(p.x, p.y);
+    }
     private onMouseMove(e: EventMouse) {
-        const p = e.getUILocation();
-        this.setHover(p.x, this.toUiY(p.y));
-        this.move(p.x);
+        const p = this.pointerToCompose(e.getUILocation());
+        this.setHover(p.x, p.y);
+        if (this.pointerDown) this.move(p.x);
     }
     private onMouseUp(e: EventMouse) {
         if (e.getButton() !== 0) return;
         this.pointerDown = false;
-        const p = e.getUILocation();
-        this.tap(p.x, this.toUiY(p.y));
+        const p = this.pointerToCompose(e.getUILocation());
+        this.tap(p.x, p.y);
     }
     private onKeyDown(e: EventKeyboard) {
         if (e.keyCode === KeyCode.ARROW_LEFT || e.keyCode === KeyCode.KEY_A) this.left = true;
         if (e.keyCode === KeyCode.ARROW_RIGHT || e.keyCode === KeyCode.KEY_D) this.right = true;
+        if (e.keyCode === KeyCode.KEY_T) {
+            void this.toggleLeaderboard();
+            return;
+        }
         if ((e.keyCode === KeyCode.ENTER || e.keyCode === KeyCode.SPACE)
-            && this.model.phase !== 'playing' && this.model.phase !== 'intro') {
+            && this.model.phase !== 'playing' && this.model.phase !== 'intro' && !this.leaderboardOpen) {
             const btn = startButtonHit();
             this.tap(btn.cx, btn.cy);
         }
@@ -457,6 +624,7 @@ export class ZombieGateGame extends Component {
 
     onDisable() { this.left = this.right = this.pointerDown = false; }
     onDestroy() {
+        if (this.subContextShowTimer) clearTimeout(this.subContextShowTimer);
         view.off('canvas-resize', this.onCanvasResize, this);
         input.off(Input.EventType.TOUCH_START, this.onTouchStart, this);
         input.off(Input.EventType.TOUCH_MOVE, this.onTouchMove, this);

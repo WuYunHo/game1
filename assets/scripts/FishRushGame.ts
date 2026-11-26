@@ -308,7 +308,7 @@ export class FishRushGame extends Component {
     }
     private tap(x: number,y: number) {
         if (x > 635 && y < 95) { void this.toggleLeaderboard(); return; }
-        if (this.leaderboardOpen && x > 220 && x < 500 && y > 835 && y < 915) { this.leaderboardOpen = false; this.renderDirty = true; return; }
+        if (this.leaderboardOpen && x > 220 && x < 500 && y > 790 && y < 870) { this.leaderboardOpen = false; this.renderDirty = true; return; }
         if(this.model.phase==='playing' || !this.artReady) return;
         if(x<124 || x>596 || y<812 || y>898) return;
         this.model.start(this.model.phase==='won' ? this.model.stage+1 : this.model.stage);
@@ -320,9 +320,9 @@ export class FishRushGame extends Component {
         if (this.subContextShowTimer) { clearTimeout(this.subContextShowTimer); this.subContextShowTimer = null; }
         if (this.leaderboardOpen) {
             this.leaderboardRows = [
-                { name: 'YOU', score: this.model.score, self: true },
-                { name: 'BLUE FIN', score: Math.max(120, this.model.score - 18) },
-                { name: 'CAPTAIN MOUSE', score: Math.max(90, this.model.score - 41) },
+                { name: '我', score: this.model.score, self: true },
+                { name: '蓝鳍', score: Math.max(120, this.model.score - 18) },
+                { name: '鼠船长', score: Math.max(90, this.model.score - 41) },
             ];
             this.subContextShowTimer = setTimeout(() => {
                 if (this.leaderboardOpen && this.subContextNode?.isValid) this.subContextNode.active = true;
