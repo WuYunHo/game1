@@ -50,6 +50,18 @@ export type EnemyEntity = {
     y: number;
     /** Visual sub-lane offset in lane widths for staggered stacks. */
     ox: number;
+    /** Settled / animated idle offset X in lane widths (visual only). */
+    bobX: number;
+    /** Settled / animated idle offset Y in world rows (visual only). */
+    bobY: number;
+    /** >0 while hopping: elapsed time of current hop. */
+    hopT: number;
+    /** Wait before next hop (randomized per mouse). */
+    pauseTimer: number;
+    fromBobX: number;
+    fromBobY: number;
+    toBobX: number;
+    toBobY: number;
     hp: number;
     maxHp: number;
     touchCost: number;
@@ -104,12 +116,21 @@ export const ZG_RULES = Object.freeze({
     maxUnits: 40,
     duration: 60,
     forwardSpeed: 1,
-    aggroRange: 4,
+    aggroRange: 6.5,
     fireRange: 5.5,
     frontEpsilon: 0.2,
     maxWeaponTier: 2,
-    chaseLaneInterval: 0.22,
+    chaseLaneInterval: 0.38,
     laneEase: 14,
+    /** Fly-mouse idle: hop a little, bounce, then pause (not continuous buzz). */
+    idleBobX: 0.1,
+    idleBobY: 0.16,
+    idleStepX: 0.07,
+    idleStepY: 0.11,
+    idleHopDuration: 0.28,
+    idleHopBounce: 0.12,
+    idlePauseMin: 0.65,
+    idlePauseMax: 1.55,
     /** Lanes 0–1 → left gate; lanes 2–4 → right gate (each gate spans half the playable tiles). */
     leftLaneMax: 1,
     defaultCrateHp: 20,
@@ -278,12 +299,21 @@ export class ZombieGateModel {
         for (const row of LEVEL_1.enemyRows) {
             for (const spawn of row.spawns) {
                 const stats = ENEMY_STATS[spawn.kind];
+                const id = this.nextId++;
                 this.enemies.push({
-                    id: this.nextId++,
+                    id,
                     lane: spawn.lane,
                     displayLane: spawn.lane,
                     y: row.row + (spawn.dy ?? 0),
                     ox: spawn.dx ?? 0,
+                    bobX: 0,
+                    bobY: 0,
+                    hopT: 0,
+                    pauseTimer: this.rollIdlePause(id),
+                    fromBobX: 0,
+                    fromBobY: 0,
+                    toBobX: 0,
+                    toBobY: 0,
                     hp: stats.hp,
                     maxHp: stats.hp,
                     touchCost: stats.touchCost,
@@ -346,6 +376,7 @@ export class ZombieGateModel {
     private updateAggroAndChase(dt: number) {
         for (const e of this.enemies) {
             if (e.state === 'dead') continue;
+            this.updateEnemyBob(e, dt);
             const ahead = e.y - this.playerY;
             if (e.state === 'idle') {
                 if (ahead > 0 && ahead <= ZG_RULES.aggroRange && Math.abs(e.lane - this.playerLane) <= 2) {
@@ -363,6 +394,68 @@ export class ZombieGateModel {
                 e.laneStepTimer = ZG_RULES.chaseLaneInterval;
             }
         }
+    }
+
+    /** Fly-mice: hop → tiny bounce → random pause. Tanks stay planted. */
+    private updateEnemyBob(e: EnemyEntity, dt: number) {
+        if (e.kind !== 'normal') {
+            e.bobX = 0;
+            e.bobY = 0;
+            e.hopT = 0;
+            return;
+        }
+        if (e.state === 'chase') {
+            e.hopT = 0;
+            e.pauseTimer = 0;
+            e.bobX = Math.abs(e.bobX) < 0.002 ? 0 : e.bobX * Math.max(0, 1 - dt * 8);
+            e.bobY = Math.abs(e.bobY) < 0.002 ? 0 : e.bobY * Math.max(0, 1 - dt * 8);
+            return;
+        }
+
+        if (e.hopT > 0) {
+            e.hopT += dt;
+            const u = Math.min(1, e.hopT / ZG_RULES.idleHopDuration);
+            const s = u * u * (3 - 2 * u);
+            e.bobX = e.fromBobX + (e.toBobX - e.fromBobX) * s;
+            e.bobY = e.fromBobY + (e.toBobY - e.fromBobY) * s
+                + Math.sin(Math.PI * u) * ZG_RULES.idleHopBounce;
+            if (u >= 1) {
+                e.bobX = e.toBobX;
+                e.bobY = e.toBobY;
+                e.hopT = 0;
+                e.pauseTimer = this.rollIdlePause(e.id);
+            }
+            return;
+        }
+
+        e.pauseTimer -= dt;
+        if (e.pauseTimer > 0) return;
+        this.startIdleHop(e);
+    }
+
+    private rollIdlePause(seed = 0): number {
+        const span = ZG_RULES.idlePauseMax - ZG_RULES.idlePauseMin;
+        return ZG_RULES.idlePauseMin + Math.random() * span + (seed % 5) * 0.04;
+    }
+
+    private startIdleHop(e: EnemyEntity) {
+        e.fromBobX = e.bobX;
+        e.fromBobY = e.bobY;
+        let dx = (Math.random() * 2 - 1) * ZG_RULES.idleStepX;
+        let dy = (Math.random() * 2 - 1) * ZG_RULES.idleStepY;
+        if (Math.random() < 0.5) dy *= 0.3;
+        else dx *= 0.3;
+        e.toBobX = Math.max(-ZG_RULES.idleBobX, Math.min(ZG_RULES.idleBobX, e.bobX + dx));
+        e.toBobY = Math.max(-ZG_RULES.idleBobY, Math.min(ZG_RULES.idleBobY, e.bobY + dy));
+        if (Math.abs(e.toBobX - e.fromBobX) + Math.abs(e.toBobY - e.fromBobY) < 0.02) {
+            const sign = Math.random() < 0.5 ? -1 : 1;
+            if (Math.random() < 0.5) {
+                e.toBobX = Math.max(-ZG_RULES.idleBobX, Math.min(ZG_RULES.idleBobX, e.fromBobX + sign * ZG_RULES.idleStepX));
+            } else {
+                e.toBobY = Math.max(-ZG_RULES.idleBobY, Math.min(ZG_RULES.idleBobY, e.fromBobY + sign * ZG_RULES.idleStepY));
+            }
+        }
+        e.hopT = 1e-4;
     }
 
     private collectFireTargets(): FireTarget[] {

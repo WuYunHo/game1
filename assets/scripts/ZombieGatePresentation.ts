@@ -337,8 +337,8 @@ function drawWeaponCrate(cmds: DrawCommand[], crate: WeaponCrateEntity, cameraY:
 }
 
 function drawEnemy(cmds: DrawCommand[], enemy: EnemyEntity, cameraY: number) {
-    const x = Math.round(laneToX(enemy.displayLane) + enemy.ox * LANE_W);
-    const y = Math.round(worldToScreenY(enemy.y, cameraY));
+    const x = Math.round(laneToX(enemy.displayLane) + (enemy.ox + (enemy.bobX ?? 0)) * LANE_W);
+    const y = Math.round(worldToScreenY(enemy.y + (enemy.bobY ?? 0), cameraY));
     if (y < -60 || y > H + 60) return;
     const size = enemy.kind === 'tank' ? TANK_DRAW_PX : ENEMY_DRAW_PX;
     const barW = Math.max(20, size - 4);

@@ -17,7 +17,10 @@ const play = () => {
 };
 
 const enemy = (partial = {}) => ({
-    id: 1, lane: 2, displayLane: 2, y: 4, ox: 0, hp: 3, maxHp: 3, touchCost: 1, speed: 1.5,
+    id: 1, lane: 2, displayLane: 2, y: 4, ox: 0,
+    bobX: 0, bobY: 0, hopT: 0, pauseTimer: 1,
+    fromBobX: 0, fromBobY: 0, toBobX: 0, toBobY: 0,
+    hp: 3, maxHp: 3, touchCost: 1, speed: 1.5,
     state: 'idle', kind: 'normal', laneStepTimer: 0, hitFlash: 0,
     ...partial,
 });
@@ -146,6 +149,36 @@ test('level packs dense staggered fly-mice including same-lane stacks', () => {
     // Same logical lane can host multiple flies (distinct y via dy).
     const laneCounts = [0, 1, 2, 3, 4].map(lane => m.enemies.filter(e => e.lane === lane).length);
     assert.ok(Math.min(...laneCounts) >= 8, 'every lane should feel crowded');
+});
+
+test('idle fly-mice hop then pause instead of buzzing', () => {
+    const m = play();
+    m.gates = [];
+    m.weaponCrates = [];
+    m.enemies = [
+        enemy({ id: 3, kind: 'normal', state: 'idle', y: 20, lane: 0, pauseTimer: 0, hopT: 0 }),
+        enemy({ id: 4, kind: 'tank', state: 'idle', y: 20, lane: 4 }),
+    ];
+    const fly = m.enemies[0];
+    const flyY = fly.y;
+    m.tick(0.02);
+    assert.equal(fly.y, flyY);
+    assert.ok(fly.hopT > 0, 'should start a hop after pause ends');
+    // Mid-hop should lift via bounce without changing logic y.
+    m.tick(0.12);
+    assert.ok(fly.hopT > 0);
+    assert.ok(fly.bobY > fly.fromBobY || Math.abs(fly.bobX - fly.fromBobX) > 0.001);
+    // Finish hop → enter randomized pause, settle at target.
+    for (let i = 0; i < 20 && fly.hopT > 0; i++) m.tick(0.05);
+    assert.equal(fly.hopT, 0);
+    assert.ok(fly.pauseTimer >= ZG_RULES.idlePauseMin);
+    const settledX = fly.bobX;
+    const settledY = fly.bobY;
+    m.tick(0.05);
+    assert.equal(fly.bobX, settledX);
+    assert.equal(fly.bobY, settledY);
+    assert.equal(m.enemies[1].bobX, 0);
+    assert.equal(m.enemies[1].bobY, 0);
 });
 
 test('weapon crate takes squad damage n per pellet hit', () => {
