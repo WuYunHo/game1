@@ -1,5 +1,6 @@
 /**
  * In-combat utility plaques: control-mode switch + pause/resume.
+ * Anchored on the left edge (`leftSide`), stacked vertically under the progress rail.
  */
 export type ControlMode = 'buttons' | 'gesture';
 
@@ -8,10 +9,12 @@ export const CONTROL_MODE_KEY = 'deepsea_control_mode';
 export const COMBAT_HUD = Object.freeze({
     iconW: 72,
     iconH: 52,
-    /** Below progress rail. */
-    rowY: 132,
-    controlX: 56,
-    pauseX: 140,
+    /** Left-edge column center X (mirrors TOP inset from the right). */
+    leftSideX: 60,
+    /** First utility icon Y (below progress rail). */
+    controlY: 148,
+    /** Second utility icon Y — stacked under control. */
+    pauseY: 216,
     popupW: 480,
     popupH: 360,
     optionW: 400,
@@ -25,11 +28,11 @@ export function combatIconHit(cx: number, cy: number, pad = 10) {
 }
 
 export function controlIconHit() {
-    return combatIconHit(COMBAT_HUD.controlX, COMBAT_HUD.rowY);
+    return combatIconHit(COMBAT_HUD.leftSideX, COMBAT_HUD.controlY);
 }
 
 export function pauseIconHit() {
-    return combatIconHit(COMBAT_HUD.pauseX, COMBAT_HUD.rowY);
+    return combatIconHit(COMBAT_HUD.leftSideX, COMBAT_HUD.pauseY);
 }
 
 export function controlPopupCenter(playH: number) {

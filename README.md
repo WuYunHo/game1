@@ -61,7 +61,8 @@ npm test
 - `assets/resources/art/`：角色精灵 + `loading-banner.png`（大肥鱼击倒飞飞鼠加载海报）。`prompts.json` 保存提示词和来源路径。
 - `assets/scripts/LoadingUi.ts`：元气骑士风加载界面（banner 框 + 像素加载条），资源就绪且最短展示时间后进入开始面板。
 - `assets/scripts/MovePadUi.ts`：局内左右换道像素按钮（按住连跳一格）；与 A/D 共用 `left`/`right` 标志。
-- `assets/scripts/CombatHudUi.ts`：局内「按钮/手势」操控切换弹窗 + 暂停/继续图标；选择会写入本地存储。
+- `assets/scripts/CombatHudUi.ts`：局内左侧纵列（`leftSide`）「按钮/手势」操控切换弹窗 + 暂停/继续图标；选择会写入本地存储。
+- `assets/scripts/UiButton.ts`：统一 Cocos `Button` 工厂；排行/换道/操控/暂停等命中均走此处，不再手写 TOUCH 节点。
 - `assets/resources/art/loading-splash.png` + `build-templates/wechatgame/splash.png`：替换 Cocos 引擎插屏（构建后生效；编辑器预览仍可能闪默认页）。`settings/v2/packages/builder.json` 的 `splash-setting` 指向该图；改图后可跑 `tools/sync-splash.ps1`。
 - `assets/scripts/LeaderboardService.ts`：微信好友排行榜桥接，AppID 为 `wx6f85dd560abdb2c6`；胜利时保存最高分，点击 `TOP` 打开排行榜。
 - `build-templates/wechatgame/openDataContext/`：微信开放数据域排行榜模板，构建微信小游戏时放入 `build/wechatgame/openDataContext`。

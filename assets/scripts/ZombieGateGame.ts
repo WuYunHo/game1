@@ -16,6 +16,7 @@ import { LB_UI } from './LeaderboardUi';
 import { composeLoadingScreen, LOAD_UI } from './LoadingUi';
 import { MOVE_PAD } from './MovePadUi';
 import { COMBAT_HUD, CONTROL_MODE_KEY } from './CombatHudUi';
+import { createClickButton, createHoldButton, placeUiButton } from './UiButton';
 
 const { ccclass } = _decorator;
 type ArtKey = 'fish' | 'squirrel' | 'banner';
@@ -205,120 +206,68 @@ export class ZombieGateGame extends Component {
         return { x: uiLoc.x, y: h - uiLoc.y };
     }
 
-    /** Real UI hit targets so the TOP-right plaque receives Cocos node events. */
+    /** Raise a Button hit target above compose chrome. */
+    private bringHitFront(node: Node | null, active: boolean) {
+        if (!node?.isValid) return;
+        node.active = active;
+        if (active) node.setSiblingIndex(this.node.children.length - 1);
+    }
+
+    /** Real UI Button hits — all interactive plaques go through UiButton. */
     private ensureLeaderboardHitNodes() {
         if (!this.lbHitNode?.isValid) {
-            this.lbHitNode = this.makeHitNode('LbOpenHit', LB_UI.buttonW + 36, LB_UI.buttonH + 36, () => {
-                void this.toggleLeaderboard();
-            });
+            this.lbHitNode = createClickButton(this.node, {
+                name: 'LbOpenHit',
+                width: LB_UI.buttonW + 36,
+                height: LB_UI.buttonH + 36,
+                onClick: () => { void this.toggleLeaderboard(); },
+            }).node;
         }
         if (!this.lbCloseHitNode?.isValid) {
-            this.lbCloseHitNode = this.makeHitNode('LbCloseHit', LB_UI.closeW + 24, LB_UI.closeH + 24, () => {
-                if (this.leaderboardOpen) this.closeLeaderboard();
-            });
+            this.lbCloseHitNode = createClickButton(this.node, {
+                name: 'LbCloseHit',
+                width: LB_UI.closeW + 24,
+                height: LB_UI.closeH + 24,
+                onClick: () => { if (this.leaderboardOpen) this.closeLeaderboard(); },
+            }).node;
             this.lbCloseHitNode.active = false;
         }
         this.layoutLeaderboardHitNodes();
     }
 
-    private makeHitNode(name: string, w: number, h: number, onClick: () => void): Node {
-        const node = new Node(name);
-        node.layer = Layers.Enum.UI_2D;
-        const ui = node.addComponent(UITransform);
-        ui.setContentSize(w, h);
-        // Opaque-enough Graphics so UI hit-testing accepts the node.
-        const g = node.addComponent(Graphics);
-        g.fillColor = new Color(255, 255, 255, 1);
-        g.rect(-w * 0.5, -h * 0.5, w, h);
-        g.fill();
-        node.on(Node.EventType.TOUCH_END, (e: EventTouch) => {
-            e.propagationStopped = true;
-            onClick();
-        }, this);
-        node.on(Node.EventType.MOUSE_UP, (e: EventMouse) => {
-            if (e.getButton() !== 0) return;
-            e.propagationStopped = true;
-            onClick();
-        }, this);
-        this.node.addChild(node);
-        return node;
-    }
-
     private layoutLeaderboardHitNodes() {
         const h = this.playHeight;
         if (this.lbHitNode?.isValid) {
-            // Compose (buttonX, buttonY) → local center-origin / Y-up.
-            this.lbHitNode.setPosition(LB_UI.buttonX - W * 0.5, h * 0.5 - LB_UI.buttonY, 0);
-            this.lbHitNode.setSiblingIndex(this.node.children.length - 1);
-            this.lbHitNode.active = this.bootDone;
+            placeUiButton(this.lbHitNode, LB_UI.buttonX, LB_UI.buttonY, W, h);
+            this.bringHitFront(this.lbHitNode, this.bootDone);
         }
         if (this.lbCloseHitNode?.isValid) {
             const close = leaderboardCloseHit(h);
-            this.lbCloseHitNode.setPosition(close.cx - W * 0.5, h * 0.5 - close.cy, 0);
-            this.lbCloseHitNode.active = this.bootDone && this.leaderboardOpen;
-            if (this.leaderboardOpen) this.lbCloseHitNode.setSiblingIndex(this.node.children.length - 1);
+            placeUiButton(this.lbCloseHitNode, close.cx, close.cy, W, h);
+            this.bringHitFront(this.lbCloseHitNode, this.bootDone && this.leaderboardOpen);
         }
     }
 
     private ensureMovePadHitNodes() {
         if (!this.moveLeftHitNode?.isValid) {
-            this.moveLeftHitNode = this.makeHoldHitNode(
-                'MoveLeftHit',
-                MOVE_PAD.buttonW + 28,
-                MOVE_PAD.buttonH + 28,
-                () => { this.left = true; this.padPointer = true; this.renderDirty = true; },
-                () => { this.left = false; this.padPointer = false; this.renderDirty = true; },
-            );
+            this.moveLeftHitNode = createHoldButton(this.node, {
+                name: 'MoveLeftHit',
+                width: MOVE_PAD.buttonW + 28,
+                height: MOVE_PAD.buttonH + 28,
+                onDown: () => { this.left = true; this.padPointer = true; this.renderDirty = true; },
+                onUp: () => { this.left = false; this.padPointer = false; this.renderDirty = true; },
+            }).node;
         }
         if (!this.moveRightHitNode?.isValid) {
-            this.moveRightHitNode = this.makeHoldHitNode(
-                'MoveRightHit',
-                MOVE_PAD.buttonW + 28,
-                MOVE_PAD.buttonH + 28,
-                () => { this.right = true; this.padPointer = true; this.renderDirty = true; },
-                () => { this.right = false; this.padPointer = false; this.renderDirty = true; },
-            );
+            this.moveRightHitNode = createHoldButton(this.node, {
+                name: 'MoveRightHit',
+                width: MOVE_PAD.buttonW + 28,
+                height: MOVE_PAD.buttonH + 28,
+                onDown: () => { this.right = true; this.padPointer = true; this.renderDirty = true; },
+                onUp: () => { this.right = false; this.padPointer = false; this.renderDirty = true; },
+            }).node;
         }
         this.layoutMovePadHitNodes();
-    }
-
-    /** Press/hold target — feeds the same left/right flags as A/D. */
-    private makeHoldHitNode(
-        name: string,
-        w: number,
-        h: number,
-        onDown: () => void,
-        onUp: () => void,
-    ): Node {
-        const node = new Node(name);
-        node.layer = Layers.Enum.UI_2D;
-        const ui = node.addComponent(UITransform);
-        ui.setContentSize(w, h);
-        const g = node.addComponent(Graphics);
-        g.fillColor = new Color(255, 255, 255, 1);
-        g.rect(-w * 0.5, -h * 0.5, w, h);
-        g.fill();
-        const down = (e: EventTouch | EventMouse) => {
-            e.propagationStopped = true;
-            onDown();
-        };
-        const up = (e: EventTouch | EventMouse) => {
-            e.propagationStopped = true;
-            onUp();
-        };
-        node.on(Node.EventType.TOUCH_START, down, this);
-        node.on(Node.EventType.TOUCH_END, up, this);
-        node.on(Node.EventType.TOUCH_CANCEL, up, this);
-        node.on(Node.EventType.MOUSE_DOWN, (e: EventMouse) => {
-            if (e.getButton() !== 0) return;
-            down(e);
-        }, this);
-        node.on(Node.EventType.MOUSE_UP, (e: EventMouse) => {
-            if (e.getButton() !== 0) return;
-            up(e);
-        }, this);
-        this.node.addChild(node);
-        return node;
     }
 
     private layoutMovePadHitNodes() {
@@ -330,15 +279,13 @@ export class ZombieGateGame extends Component {
             && this.controlMode === 'buttons';
         if (this.moveLeftHitNode?.isValid) {
             const hit = movePadHit('left', h);
-            this.moveLeftHitNode.setPosition(hit.cx - W * 0.5, h * 0.5 - hit.cy, 0);
-            this.moveLeftHitNode.active = playing;
-            if (playing) this.moveLeftHitNode.setSiblingIndex(this.node.children.length - 1);
+            placeUiButton(this.moveLeftHitNode, hit.cx, hit.cy, W, h);
+            this.bringHitFront(this.moveLeftHitNode, playing);
         }
         if (this.moveRightHitNode?.isValid) {
             const hit = movePadHit('right', h);
-            this.moveRightHitNode.setPosition(hit.cx - W * 0.5, h * 0.5 - hit.cy, 0);
-            this.moveRightHitNode.active = playing;
-            if (playing) this.moveRightHitNode.setSiblingIndex(this.node.children.length - 1);
+            placeUiButton(this.moveRightHitNode, hit.cx, hit.cy, W, h);
+            this.bringHitFront(this.moveRightHitNode, playing);
         }
         if (!playing) {
             this.left = false;
@@ -349,31 +296,46 @@ export class ZombieGateGame extends Component {
 
     private ensureCombatHudHitNodes() {
         if (!this.controlHitNode?.isValid) {
-            this.controlHitNode = this.makeHitNode('ControlHit', COMBAT_HUD.iconW + 28, COMBAT_HUD.iconH + 28, () => {
-                this.toggleControlPopup();
-            });
+            this.controlHitNode = createClickButton(this.node, {
+                name: 'ControlHit',
+                width: COMBAT_HUD.iconW + 28,
+                height: COMBAT_HUD.iconH + 28,
+                onClick: () => { this.toggleControlPopup(); },
+            }).node;
         }
         if (!this.pauseHitNode?.isValid) {
-            this.pauseHitNode = this.makeHitNode('PauseHit', COMBAT_HUD.iconW + 28, COMBAT_HUD.iconH + 28, () => {
-                this.togglePause();
-            });
+            this.pauseHitNode = createClickButton(this.node, {
+                name: 'PauseHit',
+                width: COMBAT_HUD.iconW + 28,
+                height: COMBAT_HUD.iconH + 28,
+                onClick: () => { this.togglePause(); },
+            }).node;
         }
         if (!this.controlOpt0Hit?.isValid) {
-            this.controlOpt0Hit = this.makeHitNode('CtrlOpt0', COMBAT_HUD.optionW + 16, COMBAT_HUD.optionH + 16, () => {
-                this.pickControlMode('buttons');
-            });
+            this.controlOpt0Hit = createClickButton(this.node, {
+                name: 'CtrlOpt0',
+                width: COMBAT_HUD.optionW + 16,
+                height: COMBAT_HUD.optionH + 16,
+                onClick: () => { this.pickControlMode('buttons'); },
+            }).node;
             this.controlOpt0Hit.active = false;
         }
         if (!this.controlOpt1Hit?.isValid) {
-            this.controlOpt1Hit = this.makeHitNode('CtrlOpt1', COMBAT_HUD.optionW + 16, COMBAT_HUD.optionH + 16, () => {
-                this.pickControlMode('gesture');
-            });
+            this.controlOpt1Hit = createClickButton(this.node, {
+                name: 'CtrlOpt1',
+                width: COMBAT_HUD.optionW + 16,
+                height: COMBAT_HUD.optionH + 16,
+                onClick: () => { this.pickControlMode('gesture'); },
+            }).node;
             this.controlOpt1Hit.active = false;
         }
         if (!this.controlCloseHitNode?.isValid) {
-            this.controlCloseHitNode = this.makeHitNode('CtrlClose', 300, 84, () => {
-                this.closeControlPopup();
-            });
+            this.controlCloseHitNode = createClickButton(this.node, {
+                name: 'CtrlClose',
+                width: 300,
+                height: 84,
+                onClick: () => { this.closeControlPopup(); },
+            }).node;
             this.controlCloseHitNode.active = false;
         }
         this.layoutCombatHudHitNodes();
@@ -384,34 +346,29 @@ export class ZombieGateGame extends Component {
         const showUtils = this.bootDone && this.inCombat() && !this.leaderboardOpen;
         if (this.controlHitNode?.isValid) {
             const hit = controlIconHit();
-            this.controlHitNode.setPosition(hit.cx - W * 0.5, h * 0.5 - hit.cy, 0);
-            this.controlHitNode.active = showUtils;
-            if (showUtils) this.controlHitNode.setSiblingIndex(this.node.children.length - 1);
+            placeUiButton(this.controlHitNode, hit.cx, hit.cy, W, h);
+            this.bringHitFront(this.controlHitNode, showUtils);
         }
         if (this.pauseHitNode?.isValid) {
             const hit = pauseIconHit();
-            this.pauseHitNode.setPosition(hit.cx - W * 0.5, h * 0.5 - hit.cy, 0);
-            this.pauseHitNode.active = showUtils;
-            if (showUtils) this.pauseHitNode.setSiblingIndex(this.node.children.length - 1);
+            placeUiButton(this.pauseHitNode, hit.cx, hit.cy, W, h);
+            this.bringHitFront(this.pauseHitNode, showUtils);
         }
         const popup = this.bootDone && this.controlPopupOpen;
         if (this.controlOpt0Hit?.isValid) {
             const hit = controlOptionHit(h, 0);
-            this.controlOpt0Hit.setPosition(hit.cx - W * 0.5, h * 0.5 - hit.cy, 0);
-            this.controlOpt0Hit.active = popup;
-            if (popup) this.controlOpt0Hit.setSiblingIndex(this.node.children.length - 1);
+            placeUiButton(this.controlOpt0Hit, hit.cx, hit.cy, W, h);
+            this.bringHitFront(this.controlOpt0Hit, popup);
         }
         if (this.controlOpt1Hit?.isValid) {
             const hit = controlOptionHit(h, 1);
-            this.controlOpt1Hit.setPosition(hit.cx - W * 0.5, h * 0.5 - hit.cy, 0);
-            this.controlOpt1Hit.active = popup;
-            if (popup) this.controlOpt1Hit.setSiblingIndex(this.node.children.length - 1);
+            placeUiButton(this.controlOpt1Hit, hit.cx, hit.cy, W, h);
+            this.bringHitFront(this.controlOpt1Hit, popup);
         }
         if (this.controlCloseHitNode?.isValid) {
             const hit = controlCloseHit(h);
-            this.controlCloseHitNode.setPosition(hit.cx - W * 0.5, h * 0.5 - hit.cy, 0);
-            this.controlCloseHitNode.active = popup;
-            if (popup) this.controlCloseHitNode.setSiblingIndex(this.node.children.length - 1);
+            placeUiButton(this.controlCloseHitNode, hit.cx, hit.cy, W, h);
+            this.bringHitFront(this.controlCloseHitNode, popup);
         }
     }
 
