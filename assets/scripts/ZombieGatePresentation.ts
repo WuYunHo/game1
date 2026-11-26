@@ -19,8 +19,9 @@ export type DrawCommand = {
     scrollY?: number;
 };
 
-const W = 720;
-const H = 1280;
+/** Design width stays 720 (FIXED_WIDTH). Height follows the real visible area. */
+export const W = 720;
+let H = 1280;
 /**
  * Denser Soul Knight-like floor: more / smaller tiles.
  * 22 cols = borders + 5 lanes × 4 tiles (playable 1..20).
@@ -50,9 +51,22 @@ export const TANK_DRAW_PX = 68;
 export const GATE_COLS_LEFT = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
 export const GATE_COLS_RIGHT = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20] as const;
 const GATE_TILES = GATE_COLS_LEFT.length;
-/** Player sits near lower third; camera scrolls the full-height board. */
-const PLAYER_SCREEN_Y = H * 0.72;
-const VISIBLE_ROWS = Math.ceil(H / ROW_PX) + 2;
+
+export function getPlayHeight(): number { return H; }
+export function getPlayCenterY(): number { return H * 0.5; }
+/** Call when canvas visible size changes (FIXED_WIDTH → height varies). */
+export function setPlayHeight(height: number) {
+    const next = Math.max(960, Math.round(height));
+    if (next === H) return;
+    H = next;
+    floorCacheSnap = Number.NaN;
+    floorCacheCmds = [];
+    floorCacheH = 0;
+}
+
+/** Lower on screen (closer to device bottom) — Soul Knight-style fight lane. */
+function playerScreenY(): number { return H * 0.84; }
+function visibleRows(): number { return Math.ceil(H / ROW_PX) + 2; }
 
 export function colToX(col: number): number {
     return (col + 0.5) * TILE_W;
@@ -75,15 +89,16 @@ export function worldToScreenY(worldY: number, cameraY: number): number {
 }
 
 export function cameraForPlayer(playerY: number): number {
-    return playerY - (H - PLAYER_SCREEN_Y) / ROW_PX;
+    return playerY - (H - playerScreenY()) / ROW_PX;
 }
 
 /** Cached floor geometry — avoid reallocating ~900 rect cmds every frame. */
 let floorCacheSnap = Number.NaN;
+let floorCacheH = 0;
 let floorCacheCmds: DrawCommand[] = [];
 
 function buildFloorTiles(floorSnap: number): DrawCommand[] {
-    if (floorSnap === floorCacheSnap && floorCacheCmds.length > 0) return floorCacheCmds;
+    if (floorSnap === floorCacheSnap && floorCacheH === H && floorCacheCmds.length > 0) return floorCacheCmds;
     const floorByFill = new Map<string, DrawCommand[]>();
     const pushFloor = (id: string, x: number, y: number, w: number, h: number, fill: string) => {
         let bucket = floorByFill.get(fill);
@@ -93,12 +108,12 @@ function buildFloorTiles(floorSnap: number): DrawCommand[] {
         }
         bucket.push({ id, kind: 'rect', x, y, w, h, radius: 0, fill });
     };
-    const rowStart = floorSnap - 1;
-    const rowEnd = floorSnap + VISIBLE_ROWS + 1;
+    // Cover full viewport including negative world rows (early game / tall FIXED_WIDTH).
+    const rowStart = floorSnap - 2;
+    const rowEnd = floorSnap + visibleRows() + 1;
     const tw = TILE_W - CELL_GAP;
     const th = ROW_PX - CELL_GAP;
     for (let row = rowStart; row <= rowEnd; row++) {
-        if (row < -2) continue;
         const y = worldToScreenY(row, floorSnap);
         if (y < -ROW_PX || y > H + ROW_PX) continue;
         for (let col = 0; col < BOARD_COLS; col++) {
@@ -114,8 +129,15 @@ function buildFloorTiles(floorSnap: number): DrawCommand[] {
     const floorTiles: DrawCommand[] = [];
     for (const bucket of floorByFill.values()) floorTiles.push(...bucket);
     floorCacheSnap = floorSnap;
+    floorCacheH = H;
     floorCacheCmds = floorTiles;
     return floorTiles;
+}
+
+/** Start-button hit box in top-left UI coords (y grows downward). */
+export function startButtonHit(): { x0: number; x1: number; y0: number; y1: number; cx: number; cy: number } {
+    const cy = Math.round(H * 0.668);
+    return { x0: 180, x1: 540, y0: cy - 43, y1: cy + 43, cx: W / 2, cy };
 }
 
 export function composeZombieGate(model: ZombieGateModel, hover: { x: number; y: number } | null = null): DrawCommand[] {
@@ -133,29 +155,6 @@ export function composeZombieGate(model: ZombieGateModel, hover: { x: number; y:
         floorSnap,
         scrollY,
         graphicsCommands: buildFloorTiles(floorSnap),
-    });
-
-    const bandY = worldToScreenY(model.playerY + 3.2, cameraY);
-    const leftBandX = (colToX(GATE_COLS_LEFT[0]) + colToX(GATE_COLS_LEFT[GATE_TILES - 1])) / 2;
-    const rightBandX = (colToX(GATE_COLS_RIGHT[0]) + colToX(GATE_COLS_RIGHT[GATE_TILES - 1])) / 2;
-    const bandW = TILE_W * GATE_TILES - 4;
-    cmds.push({
-        id: 'sideLeft', kind: 'rect',
-        x: leftBandX, y: bandY,
-        w: bandW, h: 6,
-        fill: playerSide === 'left' ? '#3aa0b8' : '#2a4552', radius: 0,
-    });
-    cmds.push({
-        id: 'sideRight', kind: 'rect',
-        x: rightBandX, y: bandY,
-        w: bandW, h: 6,
-        fill: playerSide === 'right' ? '#3aa0b8' : '#2a4552', radius: 0,
-    });
-
-    const frontY = worldToScreenY(model.playerY, cameraY);
-    cmds.push({
-        id: 'front', kind: 'rect',
-        x: W / 2, y: frontY, w: TILE_W * (BOARD_COLS - 2), h: 3, fill: '#7fd0e0', radius: 0,
     });
 
     for (const gate of model.gates) drawGate(cmds, gate, cameraY, model, playerSide);
@@ -562,40 +561,42 @@ function drawPanel(
     model: ZombieGateModel,
     hover: { x: number; y: number } | null,
 ) {
+    const btn = startButtonHit();
+    const panelY = Math.round(H * 0.594);
     // Wooden / dungeon plaque frame (SK difficulty sign vibe).
-    pushPixelPlaque(cmds, 'panel', W / 2, 760, 500, 210, '#3a2a1c', '#8a6a48');
+    pushPixelPlaque(cmds, 'panel', W / 2, panelY, 500, 210, '#3a2a1c', '#8a6a48');
     cmds.push({
         id: 'panelInner', kind: 'rect',
-        x: W / 2, y: 760, w: 470, h: 180, fill: '#241810', radius: 0,
+        x: W / 2, y: panelY, w: 470, h: 180, fill: '#241810', radius: 0,
     });
     const title = model.phase === 'ready' ? '向僵尸开炮 · 前期'
         : model.phase === 'won' ? '前线守住！' : '鱼群覆灭';
     const sub = model.phase === 'ready'
         ? '格子换道 · 过门成长 · 自动射击'
         : `得分 ${model.score}  人数峰值 ${model.peakUnits}`;
-    pushHudText(cmds, 'title', W / 2, 710, title, 34, '#fff6e8');
-    cmds.push({ id: 'sub', kind: 'text', x: W / 2, y: 758, text: sub, size: 18, bold: true, fill: '#c8b090' });
+    pushHudText(cmds, 'title', W / 2, panelY - 50, title, 34, '#fff6e8');
+    cmds.push({ id: 'sub', kind: 'text', x: W / 2, y: panelY - 2, text: sub, size: 18, bold: true, fill: '#c8b090' });
 
-    const hot = !!(hover && hover.x >= 124 && hover.x <= 596 && hover.y >= 812 && hover.y <= 898);
+    const hot = !!(hover && hover.x >= btn.x0 && hover.x <= btn.x1 && hover.y >= btn.y0 && hover.y <= btn.y1);
     const btnFill = hot ? '#3aa0b8' : '#2a7f94';
     // Chunky CTA with black outline (not rounded pill).
     cmds.push({
         id: 'buttonOut', kind: 'rect',
-        x: W / 2, y: 855, w: 366, h: 92, fill: '#141414', radius: 0,
+        x: W / 2, y: btn.cy, w: 366, h: 92, fill: '#141414', radius: 0,
     });
     cmds.push({
         id: 'button', kind: 'rect',
-        x: W / 2, y: 855, w: 354, h: 80, fill: btnFill, radius: 0,
+        x: W / 2, y: btn.cy, w: 354, h: 80, fill: btnFill, radius: 0,
     });
     cmds.push({
         id: 'buttonHi', kind: 'rect',
-        x: W / 2, y: 855 - 34, w: 340, h: 4, fill: '#7fd0e0', radius: 0,
+        x: W / 2, y: btn.cy - 34, w: 340, h: 4, fill: '#7fd0e0', radius: 0,
     });
     pushHudText(
         cmds,
         'buttonText',
         W / 2,
-        855,
+        btn.cy,
         model.phase === 'ready' ? '开始战斗' : model.phase === 'won' ? '再来一局' : '重新挑战',
         30,
         '#ffffff',

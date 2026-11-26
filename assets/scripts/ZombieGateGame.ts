@@ -5,7 +5,10 @@ import {
     VerticalTextAlignment, view, Widget,
 } from 'cc';
 import { ZombieGateModel } from './ZombieGateModel';
-import { composeZombieGate, DrawCommand, laneFromX } from './ZombieGatePresentation';
+import {
+    composeZombieGate, DrawCommand, getPlayHeight, laneFromX,
+    setPlayHeight, startButtonHit, W,
+} from './ZombieGatePresentation';
 import { LeaderboardService } from './LeaderboardService';
 
 const { ccclass } = _decorator;
@@ -37,10 +40,14 @@ export class ZombieGateGame extends Component {
     private lastPhase = this.model.phase;
     private hover: { x: number; y: number } | null = null;
     private leaderboard = new LeaderboardService();
+    private playHeight = 1280;
 
     onLoad() {
-        view.setDesignResolutionSize(720, 1280, ResolutionPolicy.SHOW_ALL);
+        // FIXED_WIDTH: fill left/right; grow height to match device (no letterbox bars).
+        view.setDesignResolutionSize(720, 1280, ResolutionPolicy.FIXED_WIDTH);
+        this.syncPlaySize();
         this.ensureCanvasWidget();
+        view.on('canvas-resize', this.onCanvasResize, this);
         input.on(Input.EventType.TOUCH_START, this.onTouchStart, this);
         input.on(Input.EventType.TOUCH_MOVE, this.onTouchMove, this);
         input.on(Input.EventType.TOUCH_END, this.onTouchEnd, this);
@@ -63,10 +70,25 @@ export class ZombieGateGame extends Component {
         });
     }
 
-    /** Full-screen Widget so 720×1280 UI fits WeChat / different aspect ratios. */
+    private onCanvasResize() {
+        this.syncPlaySize();
+        this.ensureCanvasWidget();
+        this.renderDirty = true;
+    }
+
+    /** Match presentation + node size to the actual FIXED_WIDTH visible height. */
+    private syncPlaySize() {
+        const visible = view.getVisibleSize();
+        const h = Math.max(960, Math.round(visible.height));
+        setPlayHeight(h);
+        this.playHeight = getPlayHeight();
+    }
+
+    /** Stretch root to full visible area (width locked to 720 design). */
     private ensureCanvasWidget() {
+        const h = this.playHeight;
         const ui = this.node.getComponent(UITransform);
-        if (ui) ui.setContentSize(720, 1280);
+        if (ui) ui.setContentSize(W, h);
         let widget = this.node.getComponent(Widget);
         if (!widget) widget = this.node.addComponent(Widget);
         widget.isAlignTop = true;
@@ -79,6 +101,11 @@ export class ZombieGateGame extends Component {
         widget.right = 0;
         widget.alignMode = Widget.AlignMode.ON_WINDOW_RESIZE;
         widget.updateAlignment();
+    }
+
+    /** UILocation is bottom-left origin → convert to top-left compose coords. */
+    private toUiY(uiY: number): number {
+        return this.playHeight - uiY;
     }
 
     /** Prefer spriteFrame sub-asset; fall back to ImageAsset → Texture2D → SpriteFrame. */
@@ -119,7 +146,20 @@ export class ZombieGateGame extends Component {
         }
     }
 
+    start() {
+        this.syncPlaySize();
+        this.ensureCanvasWidget();
+        this.renderDirty = true;
+    }
+
     update(dt: number) {
+        const visibleH = Math.max(960, Math.round(view.getVisibleSize().height));
+        if (visibleH !== this.playHeight) {
+            this.syncPlaySize();
+            this.ensureCanvasWidget();
+            this.renderDirty = true;
+            this.readyRendered = false;
+        }
         const step = Math.min(dt, 0.05);
         this.laneCool = Math.max(0, this.laneCool - step);
         if (this.model.phase === 'playing' && this.laneCool <= 0) {
@@ -170,12 +210,14 @@ export class ZombieGateGame extends Component {
             }
             index++;
 
-            const x = c.x ?? 360, y = c.y ?? 640;
+            const cx = W / 2;
+            const cy = this.playHeight / 2;
+            const x = c.x ?? cx, y = c.y ?? cy;
             const w = c.w ?? 1, h = c.h ?? 1;
             const scrollY = c.scrollY ?? 0;
             // Lines are stroked in absolute space; keep node at origin.
             if (c.kind === 'line') item.node.setPosition(0, 0, 0);
-            else item.node.setPosition(x - 360, 640 - y - scrollY, 0);
+            else item.node.setPosition(x - cx, cy - y - scrollY, 0);
 
             // Content signature excludes x/y — camera scroll only moves nodes (battle-style).
             const signature = this.contentSignature(c);
@@ -229,8 +271,10 @@ export class ZombieGateGame extends Component {
                     stroke.a = alpha;
                     g.strokeColor = stroke;
                     g.lineWidth = c.line ?? 3;
-                    g.moveTo((c.x ?? 0) - 360, 640 - (c.y ?? 0));
-                    g.lineTo((c.x2 ?? 0) - 360, 640 - (c.y2 ?? 0));
+                    const cx = W / 2;
+                    const cy = this.playHeight / 2;
+                    g.moveTo((c.x ?? 0) - cx, cy - (c.y ?? 0));
+                    g.lineTo((c.x2 ?? 0) - cx, cy - (c.y2 ?? 0));
                     g.stroke();
                 } else {
                     const fill = new Color(c.fill ?? '#ffffff');
@@ -254,6 +298,8 @@ export class ZombieGateGame extends Component {
 
     private drawGraphicsBatch(g: Graphics, commands: DrawCommand[]) {
         // Group by fill color and issue one fill() per group — critical for the floor batch.
+        const cx = W / 2;
+        const cy = this.playHeight / 2;
         let i = 0;
         while (i < commands.length) {
             const fill = commands[i].fill ?? '#ffffff';
@@ -261,12 +307,12 @@ export class ZombieGateGame extends Component {
             const start = i;
             while (i < commands.length && (commands[i].fill ?? '#ffffff') === fill) {
                 const c = commands[i];
-                const x = c.x ?? 360, y = c.y ?? 640;
+                const x = c.x ?? cx, y = c.y ?? cy;
                 const w = c.w ?? 1, h = c.h ?? 1;
                 const rad = c.radius ?? 0;
-                if (c.kind === 'ellipse') g.ellipse(x - 360, 640 - y, w / 2, h / 2);
-                else if (rad > 0) g.roundRect(x - 360 - w / 2, 640 - y - h / 2, w, h, Math.min(rad, w / 2, h / 2));
-                else g.rect(x - 360 - w / 2, 640 - y - h / 2, w, h);
+                if (c.kind === 'ellipse') g.ellipse(x - cx, cy - y, w / 2, h / 2);
+                else if (rad > 0) g.roundRect(x - cx - w / 2, cy - y - h / 2, w, h, Math.min(rad, w / 2, h / 2));
+                else g.rect(x - cx - w / 2, cy - y - h / 2, w, h);
                 i++;
             }
             g.fill();
@@ -274,13 +320,13 @@ export class ZombieGateGame extends Component {
             for (let j = start; j < i; j++) {
                 const c = commands[j];
                 if (!c.stroke) continue;
-                const x = c.x ?? 360, y = c.y ?? 640;
+                const x = c.x ?? cx, y = c.y ?? cy;
                 const w = c.w ?? 1, h = c.h ?? 1;
                 g.strokeColor = new Color(c.stroke);
                 g.lineWidth = c.line ?? 1;
                 const rad = c.radius ?? 0;
-                if (rad > 0) g.roundRect(x - 360 - w / 2, 640 - y - h / 2, w, h, Math.min(rad, w / 2, h / 2));
-                else g.rect(x - 360 - w / 2, 640 - y - h / 2, w, h);
+                if (rad > 0) g.roundRect(x - cx - w / 2, cy - y - h / 2, w, h, Math.min(rad, w / 2, h / 2));
+                else g.rect(x - cx - w / 2, cy - y - h / 2, w, h);
                 g.stroke();
             }
         }
@@ -353,7 +399,8 @@ export class ZombieGateGame extends Component {
 
     private tap(x: number, y: number) {
         if (this.model.phase === 'playing' || !this.artReady) return;
-        if (x < 124 || x > 596 || y < 812 || y > 898) return;
+        const btn = startButtonHit();
+        if (x < btn.x0 || x > btn.x1 || y < btn.y0 || y > btn.y1) return;
         this.model.start(this.model.stage);
         this.renderDirty = true;
     }
@@ -361,37 +408,38 @@ export class ZombieGateGame extends Component {
     private onTouchStart(e: EventTouch) {
         this.pointerDown = true;
         const p = e.getUILocation();
-        this.setHover(p.x, 1280 - p.y);
+        this.setHover(p.x, this.toUiY(p.y));
         this.move(p.x);
     }
     private onTouchMove(e: EventTouch) {
         const p = e.getUILocation();
-        this.setHover(p.x, 1280 - p.y);
+        this.setHover(p.x, this.toUiY(p.y));
         if (this.pointerDown) this.move(p.x);
     }
     private onTouchEnd(e: EventTouch) {
         this.pointerDown = false;
         const p = e.getUILocation();
-        this.tap(p.x, 1280 - p.y);
+        this.tap(p.x, this.toUiY(p.y));
     }
     private onTouchCancel() { this.pointerDown = false; }
     private onMouseDown(e: EventMouse) { if (e.getButton() === 0) this.pointerDown = true; }
     private onMouseMove(e: EventMouse) {
         const p = e.getUILocation();
-        this.setHover(p.x, 1280 - p.y);
+        this.setHover(p.x, this.toUiY(p.y));
         this.move(p.x);
     }
     private onMouseUp(e: EventMouse) {
         if (e.getButton() !== 0) return;
         this.pointerDown = false;
         const p = e.getUILocation();
-        this.tap(p.x, 1280 - p.y);
+        this.tap(p.x, this.toUiY(p.y));
     }
     private onKeyDown(e: EventKeyboard) {
         if (e.keyCode === KeyCode.ARROW_LEFT || e.keyCode === KeyCode.KEY_A) this.left = true;
         if (e.keyCode === KeyCode.ARROW_RIGHT || e.keyCode === KeyCode.KEY_D) this.right = true;
         if ((e.keyCode === KeyCode.ENTER || e.keyCode === KeyCode.SPACE) && this.model.phase !== 'playing') {
-            this.tap(360, 855);
+            const btn = startButtonHit();
+            this.tap(btn.cx, btn.cy);
         }
     }
     private onKeyUp(e: EventKeyboard) {
@@ -401,6 +449,7 @@ export class ZombieGateGame extends Component {
 
     onDisable() { this.left = this.right = this.pointerDown = false; }
     onDestroy() {
+        view.off('canvas-resize', this.onCanvasResize, this);
         input.off(Input.EventType.TOUCH_START, this.onTouchStart, this);
         input.off(Input.EventType.TOUCH_MOVE, this.onTouchMove, this);
         input.off(Input.EventType.TOUCH_END, this.onTouchEnd, this);
