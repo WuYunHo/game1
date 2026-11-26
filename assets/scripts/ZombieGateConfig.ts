@@ -17,6 +17,7 @@ export type GateDef = {
 
 /** Reusable gate catalog — add rows here when introducing new door types. */
 export const GATE_DEFS: Record<string, GateDef> = Object.freeze({
+    add1: { id: 'add1', kind: 'add', value: 1, label: '+1', good: true },
     add2: { id: 'add2', kind: 'add', value: 2, label: '+2', good: true },
     add3: { id: 'add3', kind: 'add', value: 3, label: '+3', good: true },
     add4: { id: 'add4', kind: 'add', value: 4, label: '+4', good: true },

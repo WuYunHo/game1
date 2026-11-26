@@ -1,7 +1,7 @@
 /** Canvas/Cocos-agnostic draw commands for the grid early-combat mode. */
 import {
-    ZombieGateModel, ZG_RULES, WEAPONS, sideForLane,
-    type GateEntity, type EnemyEntity, type WeaponCrateEntity, type Feedback, type ShotEvent,
+    ZombieGateModel, ZG_RULES, WEAPONS, sideForCol,
+    type BurstPixel, type GateEntity, type EnemyEntity, type WeaponCrateEntity, type Feedback, type ShotEvent,
 } from './ZombieGateModel';
 
 export type DrawCommand = {
@@ -78,10 +78,16 @@ export function laneToX(lane: number): number {
     return (firstCol + TILES_PER_LANE * 0.5) * TILE_W;
 }
 
-export function laneFromX(x: number): number {
+/** Pointer X → playable floor column (1 tile per step). */
+export function colFromX(x: number): number {
     const col = Math.floor(x / TILE_W);
-    const playable = Math.max(PLAYABLE_FIRST_COL, Math.min(BORDER_RIGHT - 1, col));
-    return Math.max(0, Math.min(ZG_RULES.laneCount - 1, Math.floor((playable - PLAYABLE_FIRST_COL) / TILES_PER_LANE)));
+    return Math.max(PLAYABLE_FIRST_COL, Math.min(BORDER_RIGHT - 1, col));
+}
+
+/** @deprecated Prefer colFromX — kept for older tests that speak in lanes. */
+export function laneFromX(x: number): number {
+    const col = colFromX(x);
+    return Math.max(0, Math.min(ZG_RULES.laneCount - 1, Math.floor((col - PLAYABLE_FIRST_COL) / TILES_PER_LANE)));
 }
 
 export function worldToScreenY(worldY: number, cameraY: number): number {
@@ -143,7 +149,7 @@ export function startButtonHit(): { x0: number; x1: number; y0: number; y1: numb
 export function composeZombieGate(model: ZombieGateModel, hover: { x: number; y: number } | null = null): DrawCommand[] {
     const cmds: DrawCommand[] = [];
     const cameraY = cameraForPlayer(model.playerY);
-    const playerSide = sideForLane(model.playerLane);
+    const playerSide = sideForCol(model.playerCol);
 
     // Floor = 1 Graphics node; rebuild only when floorSnap changes (cached).
     const floorSnap = Math.floor(cameraY);
@@ -168,7 +174,7 @@ export function composeZombieGate(model: ZombieGateModel, hover: { x: number; y:
         const size = 18 + muzzle.tier * 10;
         cmds.push({
             id: `muzzle-${muzzle.id}`, kind: 'ellipse',
-            x: laneToX(model.displayLane), y: worldToScreenY(muzzle.y, cameraY),
+            x: colToX(muzzle.col), y: worldToScreenY(muzzle.y, cameraY),
             w: size * (1.2 - t * 0.4), h: size * (0.9 - t * 0.3),
             fill: weapon.color, alpha: 0.35 + t * 0.55,
         });
@@ -187,9 +193,78 @@ export function composeZombieGate(model: ZombieGateModel, hover: { x: number; y:
         });
     }
 
-    if (model.phase !== 'playing') drawPanel(cmds, model, hover);
+    if (model.phase === 'intro') {
+        ensureIntroBurst(model);
+        drawIntroBurst(cmds, model);
+    } else if (model.phase !== 'playing') {
+        drawPanel(cmds, model, hover);
+    }
 
     return cmds;
+}
+
+/** Shatter the start plaque + CTA into chunky pixels (once per intro). */
+export function buildIntroBurstPixels(): Omit<BurstPixel, 'id'>[] {
+    const btn = startButtonHit();
+    const panelY = Math.round(H * 0.594);
+    const colors = ['#3a2a1c', '#8a6a48', '#241810', '#fff6e8', '#2a7f94', '#3aa0b8', '#7fd0e0', '#c8b090', '#141414'];
+    const pixels: Omit<BurstPixel, 'id'>[] = [];
+    const pushBlock = (cx: number, cy: number, bw: number, bh: number, count: number, speed: number) => {
+        for (let i = 0; i < count; i++) {
+            const px = cx + (Math.random() - 0.5) * bw;
+            const py = cy + (Math.random() - 0.5) * bh;
+            const ang = Math.random() * Math.PI * 2;
+            const spd = speed * (0.55 + Math.random() * 0.9);
+            const life = 0.35 + Math.random() * 0.45;
+            pixels.push({
+                x: px,
+                y: py,
+                vx: Math.cos(ang) * spd,
+                vy: Math.sin(ang) * spd - 120 - Math.random() * 220,
+                life,
+                maxLife: life,
+                size: 4 + Math.floor(Math.random() * 8),
+                fill: colors[Math.floor(Math.random() * colors.length)],
+            });
+        }
+    };
+    pushBlock(W / 2, panelY, 480, 190, 42, 420);
+    pushBlock(W / 2, btn.cy, 340, 80, 28, 520);
+    return pixels;
+}
+
+function ensureIntroBurst(model: ZombieGateModel) {
+    if (model.burstPixels.length > 0) return;
+    model.seedIntroBurst(buildIntroBurstPixels());
+}
+
+function drawIntroBurst(cmds: DrawCommand[], model: ZombieGateModel) {
+    if (model.burstPixels.length === 0) return;
+    const graphicsCommands: DrawCommand[] = [];
+    for (const p of model.burstPixels) {
+        const t = Math.max(0, p.life / p.maxLife);
+        // Shrink slightly as shards fade.
+        const s = Math.max(2, p.size * (0.55 + t * 0.45));
+        graphicsCommands.push({
+            id: `bp-${p.id}`,
+            kind: 'rect',
+            x: p.x,
+            y: p.y,
+            w: s,
+            h: s,
+            fill: p.fill,
+            radius: 0,
+        });
+    }
+    cmds.push({
+        id: 'introBurst',
+        kind: 'graphicsBatch',
+        x: W / 2,
+        y: H / 2,
+        w: W,
+        h: H,
+        graphicsCommands,
+    });
 }
 
 function drawGate(
@@ -382,43 +457,63 @@ function drawShot(cmds: DrawCommand[], shot: ShotEvent, cameraY: number, model: 
     const t = shot.life / shot.maxLife;
     cmds.push({
         id: `shot-${shot.id}`, kind: 'line',
-        x: laneToX(shot.fromLane), y: worldToScreenY(shot.fromY, cameraY),
-        x2: laneToX(shot.toLane), y2: worldToScreenY(shot.toY, cameraY),
+        x: colToX(shot.fromCol), y: worldToScreenY(shot.fromY, cameraY),
+        x2: colToX(shot.toCol), y2: worldToScreenY(shot.toY, cameraY),
         stroke: weapon.color, line: weapon.beam,
         alpha: 0.35 + t * 0.65,
     });
     // Impact spark at target.
     cmds.push({
         id: `spark-${shot.id}`, kind: 'ellipse',
-        x: laneToX(shot.toLane), y: worldToScreenY(shot.toY, cameraY),
+        x: colToX(shot.toCol), y: worldToScreenY(shot.toY, cameraY),
         w: 10 + shot.tier * 6, h: 10 + shot.tier * 6,
         fill: weapon.color, alpha: t * 0.8,
     });
     void model;
 }
 
+/**
+ * 品字形：头鱼在最上（第一排），往下每排多 1 只（1 / 2 / 3 / 3…），居中对齐。
+ * screen y 向下增大，所以后排用正 oy。
+ */
+export function squadOffset(index: number, stackX: number, stackY: number): { ox: number; oy: number } {
+    let remaining = Math.max(0, index);
+    let row = 0;
+    while (true) {
+        const cols = Math.min(row + 1, 3);
+        if (remaining < cols) {
+            return {
+                ox: (remaining - (cols - 1) * 0.5) * stackX,
+                oy: row * stackY,
+            };
+        }
+        remaining -= cols;
+        row++;
+    }
+}
+
+/** Bottom of the 品字形 stack relative to the leader (positive = below). */
+export function squadLayoutBottom(count: number, stackY: number): number {
+    const n = Math.max(0, Math.floor(count));
+    if (n <= 0) return 0;
+    return squadOffset(n - 1, 1, stackY).oy;
+}
+
 function drawSquad(cmds: DrawCommand[], model: ZombieGateModel, cameraY: number) {
-    const x = laneToX(model.displayLane);
+    const x = colToX(model.displayCol);
     const y = worldToScreenY(model.playerY, cameraY);
     const visual = Math.min(model.unitCount, 8);
     const weapon = model.weapon;
     const size = FISH_DRAW_PX;
     const stackX = Math.round(size * 0.38);
     const stackY = Math.round(size * 0.34);
-
-    // Opaque foot disc (no alpha — keeps primitive batching intact).
-    cmds.push({
-        id: 'squad-pad-out', kind: 'ellipse',
-        x, y: y + size * 0.4, w: TILE_W * 1.15, h: 14, fill: '#141414',
-    });
-    cmds.push({
-        id: 'squad-pad', kind: 'ellipse',
-        x, y: y + size * 0.4, w: TILE_W * 1.0, h: 10, fill: '#e8c84a',
-    });
+    // Anchor foot + weapon pips under the whole formation, not under the leader alone.
+    const stackBottom = squadLayoutBottom(visual, stackY);
+    const footY = y + stackBottom + size * 0.42;
+    const pipY = footY + 22;
 
     for (let i = 0; i < visual; i++) {
-        const ox = ((i % 3) - 1) * stackX;
-        const oy = -Math.floor(i / 3) * stackY;
+        const { ox, oy } = squadOffset(i, stackX, stackY);
         cmds.push({
             id: `unit-${i}`, kind: 'image',
             x: Math.round(x + ox), y: Math.round(y + oy), w: size, h: size, asset: 'fish',
@@ -431,12 +526,21 @@ function drawSquad(cmds: DrawCommand[], model: ZombieGateModel, cameraY: number)
         });
     }
 
-    // Soul Knight skill-ring weapon pips (chunky black outline + grey disc).
+    // Opaque foot disc sits under the rear row.
+    cmds.push({
+        id: 'squad-pad-out', kind: 'ellipse',
+        x, y: footY, w: TILE_W * 1.15, h: 14, fill: '#141414',
+    });
+    cmds.push({
+        id: 'squad-pad', kind: 'ellipse',
+        x, y: footY, w: TILE_W * 1.0, h: 10, fill: '#e8c84a',
+    });
+
+    // Weapon pips always below the fish stack.
     for (let t = 0; t <= ZG_RULES.maxWeaponTier; t++) {
         const on = t <= model.weaponTier;
         const px = x - 34 + t * 34;
-        const py = y + size * 0.78;
-        pushPixelRing(cmds, `wpip-${t}`, px, py, 28, on ? (WEAPONS[t]?.color ?? '#ffe566') : '#6a6a6a', on);
+        pushPixelRing(cmds, `wpip-${t}`, px, pipY, 28, on ? (WEAPONS[t]?.color ?? '#ffe566') : '#6a6a6a', on);
     }
 }
 
@@ -504,7 +608,7 @@ function drawFeedback(cmds: DrawCommand[], f: Feedback, cameraY: number) {
     const size = f.kind === 'damage' ? 22 : f.kind === 'gate' ? 28 : 24;
     const fill = f.kind === 'damage' ? '#ffe566'
         : f.good ? '#9dffb0' : '#ff8f8f';
-    const x = laneToX(f.lane);
+    const x = colToX(f.col);
     const y = worldToScreenY(f.y, cameraY) - 28 - rise;
     const alpha = Math.min(1, t * 1.4);
     // Single shadow offset, not 8-way outline (Label storm).

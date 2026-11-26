@@ -6,7 +6,7 @@ import {
 } from 'cc';
 import { ZombieGateModel } from './ZombieGateModel';
 import {
-    composeZombieGate, DrawCommand, getPlayHeight, laneFromX,
+    composeZombieGate, DrawCommand, getPlayHeight, colFromX,
     setPlayHeight, startButtonHit, W,
 } from './ZombieGatePresentation';
 import { LeaderboardService } from './LeaderboardService';
@@ -165,7 +165,7 @@ export class ZombieGateGame extends Component {
         if (this.model.phase === 'playing' && this.laneCool <= 0) {
             if (this.left !== this.right) {
                 this.model.shiftLane(this.right ? 1 : -1);
-                this.laneCool = 0.12;
+                this.laneCool = 0.08;
                 this.renderDirty = true;
             }
         }
@@ -372,6 +372,12 @@ export class ZombieGateGame extends Component {
         if (c.kind === 'graphicsBatch') {
             const batched = c.graphicsCommands ?? [];
             if (c.id === 'floor') return ['floor', c.floorSnap ?? '', batched.length].join('|');
+            // Intro shards move every frame — include a sample point so Graphics redraws.
+            if (c.id === 'introBurst') {
+                const a = batched[0];
+                const b = batched[batched.length - 1];
+                return ['burst', batched.length, a?.x, a?.y, b?.x, b?.y].join('|');
+            }
             return ['gb', c.id, batched.length, batched[0]?.fill, batched[batched.length - 1]?.fill].join('|');
         }
         if (c.kind === 'line') {
@@ -388,7 +394,7 @@ export class ZombieGateGame extends Component {
 
     private move(x: number) {
         if (this.model.phase !== 'playing') return;
-        this.model.setLane(laneFromX(x));
+        this.model.setLane(colFromX(x));
         this.renderDirty = true;
     }
 
@@ -398,10 +404,11 @@ export class ZombieGateGame extends Component {
     }
 
     private tap(x: number, y: number) {
-        if (this.model.phase === 'playing' || !this.artReady) return;
+        if (this.model.phase === 'playing' || this.model.phase === 'intro' || !this.artReady) return;
         const btn = startButtonHit();
         if (x < btn.x0 || x > btn.x1 || y < btn.y0 || y > btn.y1) return;
         this.model.start(this.model.stage);
+        this.readyRendered = false;
         this.renderDirty = true;
     }
 
@@ -437,7 +444,8 @@ export class ZombieGateGame extends Component {
     private onKeyDown(e: EventKeyboard) {
         if (e.keyCode === KeyCode.ARROW_LEFT || e.keyCode === KeyCode.KEY_A) this.left = true;
         if (e.keyCode === KeyCode.ARROW_RIGHT || e.keyCode === KeyCode.KEY_D) this.right = true;
-        if ((e.keyCode === KeyCode.ENTER || e.keyCode === KeyCode.SPACE) && this.model.phase !== 'playing') {
+        if ((e.keyCode === KeyCode.ENTER || e.keyCode === KeyCode.SPACE)
+            && this.model.phase !== 'playing' && this.model.phase !== 'intro') {
             const btn = startButtonHit();
             this.tap(btn.cx, btn.cy);
         }
