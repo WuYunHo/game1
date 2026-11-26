@@ -9,7 +9,15 @@ import { composeZombieGate, DrawCommand, laneFromX } from './ZombieGatePresentat
 import { LeaderboardService } from './LeaderboardService';
 
 const { ccclass } = _decorator;
-type DrawNode = { node: Node; graphics?: Graphics; label?: Label; sprite?: Sprite; signature: string; poolKey: string };
+type DrawNode = {
+    node: Node;
+    graphics?: Graphics;
+    label?: Label;
+    sprite?: Sprite;
+    signature: string;
+    poolKey: string;
+    lastSibling: number;
+};
 
 /** Cocos adapter for the grid early-combat mode (no Boss). */
 @ccclass('ZombieGateGame')
@@ -144,10 +152,10 @@ export class ZombieGateGame extends Component {
     }
 
     private render(commands: DrawCommand[]) {
-        const batched = this.batchPrimitiveRuns(commands);
+        // Do NOT merge moving world rects into one Graphics — that forced clear+redraw every frame (~30fps).
         const live = new Set<string>();
         let index = 0;
-        for (const c of batched) {
+        for (const c of commands) {
             live.add(c.id);
             let item = this.drawNodes.get(c.id);
             if (!item) {
@@ -156,14 +164,23 @@ export class ZombieGateGame extends Component {
                 this.drawNodes.set(c.id, item);
             }
             item.node.active = true;
-            if (item.node.getSiblingIndex() !== index) item.node.setSiblingIndex(index);
+            if (item.lastSibling !== index) {
+                item.lastSibling = index;
+                item.node.setSiblingIndex(index);
+            }
             index++;
-            const signature = this.commandSignature(c);
-            if (signature === item.signature) continue;
-            item.signature = signature;
+
             const x = c.x ?? 360, y = c.y ?? 640;
             const w = c.w ?? 1, h = c.h ?? 1;
-            item.node.setPosition(x - 360, 640 - y, 0);
+            const scrollY = c.scrollY ?? 0;
+            // Lines are stroked in absolute space; keep node at origin.
+            if (c.kind === 'line') item.node.setPosition(0, 0, 0);
+            else item.node.setPosition(x - 360, 640 - y - scrollY, 0);
+
+            // Content signature excludes x/y — camera scroll only moves nodes (battle-style).
+            const signature = this.contentSignature(c);
+            if (signature === item.signature) continue;
+            item.signature = signature;
             item.node.getComponent(UITransform)!.setContentSize(Math.max(w, 1), Math.max(h, 1));
             const alpha = c.alpha == null ? 255 : Math.round(Math.max(0, Math.min(1, c.alpha)) * 255);
             if (item.label) {
@@ -179,7 +196,6 @@ export class ZombieGateGame extends Component {
                 l.verticalAlign = VerticalTextAlignment.CENTER;
                 l.overflow = Label.Overflow.NONE;
                 l.enableWrapText = false;
-                // Prefer chunky UI faces closer to Soul Knight HUD readability.
                 l.fontFamily = 'Arial Black, Impact, Microsoft YaHei, sans-serif';
             } else if (item.sprite) {
                 item.sprite.sizeMode = Sprite.SizeMode.CUSTOM;
@@ -188,7 +204,6 @@ export class ZombieGateGame extends Component {
                 item.sprite.color = new Color(255, 255, 255, alpha);
                 let g = item.node.getComponent(Graphics);
                 if (!frame) {
-                    // Visible stand-in when SpriteFrame import is missing.
                     if (!g) g = item.node.addComponent(Graphics);
                     g.clear();
                     const body = c.asset === 'squirrel'
@@ -217,7 +232,6 @@ export class ZombieGateGame extends Component {
                     g.moveTo((c.x ?? 0) - 360, 640 - (c.y ?? 0));
                     g.lineTo((c.x2 ?? 0) - 360, 640 - (c.y2 ?? 0));
                     g.stroke();
-                    item.node.setPosition(0, 0, 0);
                 } else {
                     const fill = new Color(c.fill ?? '#ffffff');
                     fill.a = alpha;
@@ -225,7 +239,7 @@ export class ZombieGateGame extends Component {
                     g.strokeColor = new Color(c.stroke ?? '#153d59');
                     g.lineWidth = c.line ?? 1;
                     if (c.kind === 'ellipse') g.ellipse(0, 0, w / 2, h / 2);
-                    else g.roundRect(-w / 2, -h / 2, w, h, Math.min(c.radius ?? 0, w / 2, h / 2));
+                    else g.rect(-w / 2, -h / 2, w, h);
                     g.fill();
                     if (c.stroke) g.stroke();
                 }
@@ -236,31 +250,6 @@ export class ZombieGateGame extends Component {
             this.releaseDrawNode(item);
             this.drawNodes.delete(id);
         }
-    }
-
-    private batchPrimitiveRuns(commands: DrawCommand[]): DrawCommand[] {
-        const primitive = (kind: DrawCommand['kind']) => kind === 'rect' || kind === 'ellipse';
-        const out: DrawCommand[] = [];
-        let run: DrawCommand[] = [];
-        const flush = () => {
-            if (run.length === 0) return;
-            if (run.length === 1) out.push(run[0]);
-            else {
-                out.push({
-                    id: `graphicsBatch-${run[0].id}`,
-                    kind: 'graphicsBatch',
-                    x: 360, y: 640, w: 720, h: 1280,
-                    graphicsCommands: run,
-                });
-            }
-            run = [];
-        };
-        for (const command of commands) {
-            if (primitive(command.kind) && (command.alpha == null || command.alpha >= 0.999)) run.push(command);
-            else { flush(); out.push(command); }
-        }
-        flush();
-        return out;
     }
 
     private drawGraphicsBatch(g: Graphics, commands: DrawCommand[]) {
@@ -313,7 +302,7 @@ export class ZombieGateGame extends Component {
         node.layer = Layers.Enum.UI_2D;
         node.addComponent(UITransform);
         this.node.addChild(node);
-        const item: DrawNode = { node, signature: '', poolKey };
+        const item: DrawNode = { node, signature: '', poolKey, lastSibling: -1 };
         if (c.kind === 'text') item.label = node.addComponent(Label);
         else if (c.kind === 'image') item.sprite = node.addComponent(Sprite);
         else item.graphics = node.addComponent(Graphics);
@@ -323,6 +312,7 @@ export class ZombieGateGame extends Component {
     private releaseDrawNode(item: DrawNode) {
         item.node.active = false;
         item.signature = '';
+        item.lastSibling = -1;
         let pool = this.nodePools.get(item.poolKey);
         if (!pool) {
             pool = [];
@@ -331,20 +321,19 @@ export class ZombieGateGame extends Component {
         pool.push(item);
     }
 
-    private commandSignature(c: DrawCommand): string {
+    /** Shape/style only — positions update via setPosition without Graphics.clear. */
+    private contentSignature(c: DrawCommand): string {
         if (c.kind === 'graphicsBatch') {
             const batched = c.graphicsCommands ?? [];
-            const first = batched[0];
-            const last = batched[batched.length - 1];
-            // Compact signature — never stringify every floor tile (was a major FPS killer).
-            return [
-                'gb', c.id, batched.length,
-                first?.x, first?.y, first?.fill,
-                last?.x, last?.y, last?.fill,
-            ].join('|');
+            if (c.id === 'floor') return ['floor', c.floorSnap ?? '', batched.length].join('|');
+            return ['gb', c.id, batched.length, batched[0]?.fill, batched[batched.length - 1]?.fill].join('|');
+        }
+        if (c.kind === 'line') {
+            // Lines are absolute strokes; include endpoints so they redraw while flying.
+            return ['line', c.x, c.y, c.x2, c.y2, c.stroke, c.line, c.alpha ?? 1].join('|');
         }
         return [
-            c.kind, c.x ?? 360, c.y ?? 640, c.x2 ?? '', c.y2 ?? '', c.w ?? 1, c.h ?? 1, c.radius ?? 0,
+            c.kind, c.w ?? 1, c.h ?? 1, c.radius ?? 0,
             c.fill ?? '', c.stroke ?? '', c.line ?? 1, c.text ?? '', c.size ?? 24,
             c.bold ?? true, c.asset ?? '', c.alpha ?? 1,
             c.kind === 'image' ? Boolean(this.frames[c.asset as 'fish' | 'squirrel']) : '',

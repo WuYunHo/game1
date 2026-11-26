@@ -39,15 +39,13 @@ export const LEVEL_1: {
     weaponCrates: WeaponCrateBlueprint[];
     enemyRows: EnemyRowBlueprint[];
 } = {
+    // Fewer doors, wider gaps — keep enemy density, cut gate frequency.
     gates: [
-        { row: 3, left: 'add2', right: 'sub2' },
-        { row: 7, left: 'sub3', right: 'sub1' },       // double penalty
-        { row: 11, left: 'add3', right: 'div2' },
-        { row: 15, left: 'sub2', right: 'sub5' },       // double penalty
-        { row: 21, left: 'mul2', right: 'div2' },       // only ×2, high risk
-        { row: 27, left: 'sub3', right: 'add2' },
-        { row: 35, left: 'div2', right: 'sub2' },       // double penalty
-        { row: 45, left: 'add3', right: 'sub5' },
+        { row: 5, left: 'add2', right: 'sub2' },
+        { row: 16, left: 'sub3', right: 'sub1' },      // double penalty
+        { row: 28, left: 'mul2', right: 'div2' },      // only ×2, high risk
+        { row: 42, left: 'add3', right: 'div2' },
+        { row: 54, left: 'div2', right: 'sub2' },      // double penalty
     ],
     weaponCrates: [
         { row: 8, lane: 1, crate: 'dual' },

@@ -200,6 +200,7 @@ test('destroying a weapon crate claims its weapon tier', () => {
 test('level includes double-penalty gate rows', () => {
     const { LEVEL_1 } = require('../assets/scripts/ZombieGateLevel.ts');
     const { resolveGateDef } = require('../assets/scripts/ZombieGateConfig.ts');
+    assert.ok(LEVEL_1.gates.length <= 5, 'gates should be sparse');
     const doubleBad = LEVEL_1.gates.filter(row => {
         const l = resolveGateDef(row.left);
         const r = resolveGateDef(row.right);
@@ -208,6 +209,13 @@ test('level includes double-penalty gate rows', () => {
     assert.ok(doubleBad.length >= 2, 'expected at least two double-penalty rows');
     const mulRows = LEVEL_1.gates.filter(row => resolveGateDef(row.left).kind === 'mul' || resolveGateDef(row.right).kind === 'mul');
     assert.equal(mulRows.length, 1, '×2 should appear once');
+});
+
+test('compose has no lane column tint', () => {
+    const m = play();
+    m.phase = 'playing';
+    const commands = composeZombieGate(m, null);
+    assert.equal(commands.some(c => c.id === 'laneGlow'), false);
 });
 
 test('default bullet damage is 1 and normal fly-mouse hp is 1', () => {
@@ -304,4 +312,24 @@ test('presentation draws crates and keeps command ids unique', () => {
     assert.ok((commands.find(c => c.id === 'floor').graphicsCommands || []).length >= 12);
     assert.ok(Number.isFinite(laneToX(2)));
     assert.ok(Number.isFinite(worldToScreenY(3, 1)));
+});
+
+test('floor rebuilds on row snap only and uses one rect per tile', () => {
+    const m = play();
+    m.phase = 'playing';
+    m.playerY = 10.1;
+    const a = composeZombieGate(m, null).find(c => c.id === 'floor');
+    m.playerY = 10.9;
+    const b = composeZombieGate(m, null).find(c => c.id === 'floor');
+    assert.equal(a.floorSnap, b.floorSnap, 'same integer camera row → same floor geometry');
+    assert.equal(a.graphicsCommands.length, b.graphicsCommands.length);
+    assert.ok(a.scrollY < b.scrollY, 'fractional scroll should increase');
+    // ~1 rect/tile (no 4-layer bevels). Visible rows ≈ H/ROW_PX + pad, cols = 22.
+    const maxTiles = Math.ceil(1280 / (720 / 22) + 6) * 22;
+    assert.ok(a.graphicsCommands.length <= maxTiles, `too many floor cmds: ${a.graphicsCommands.length}`);
+    assert.ok(a.graphicsCommands.length > BOARD_COLS * 10, 'expected a full visible floor');
+    const snap0 = a.floorSnap;
+    m.playerY = 10.1 + 1;
+    const c = composeZombieGate(m, null).find(c => c.id === 'floor');
+    assert.equal(c.floorSnap, snap0 + 1);
 });

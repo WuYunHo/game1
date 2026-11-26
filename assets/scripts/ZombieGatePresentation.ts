@@ -13,6 +13,10 @@ export type DrawCommand = {
     text?: string; size?: number; bold?: boolean;
     radius?: number; asset?: string; alpha?: number;
     graphicsCommands?: DrawCommand[];
+    /** Floor: integer camera row used to build geometry (rebuild only when this changes). */
+    floorSnap?: number;
+    /** Floor: fractional scroll in screen px; move node, do not redraw Graphics. */
+    scrollY?: number;
 };
 
 const W = 720;
@@ -27,10 +31,11 @@ export const BORDER_RIGHT = BOARD_COLS - 1;
 /** Playable columns 1..20 → 5 logical lanes × 4 tiles. */
 export const TILES_PER_LANE = 4;
 export const PLAYABLE_FIRST_COL = 1;
-const CELL_GAP = 2;
+/** Soft seams — Soul Knight floors are quiet, not high-contrast outlines. */
+const CELL_GAP = 1;
 export const TILE_W = W / BOARD_COLS;
 /** Square tiles so the checkerboard can fill the screen edge-to-edge. */
-const ROW_PX = TILE_W;
+export const ROW_PX = TILE_W;
 const LANE_W = TILE_W * TILES_PER_LANE;
 const CELL_W = LANE_W - CELL_GAP;
 const GATE_H = Math.max(12, (ROW_PX - CELL_GAP) * 0.55);
@@ -73,13 +78,12 @@ export function cameraForPlayer(playerY: number): number {
     return playerY - (H - PLAYER_SCREEN_Y) / ROW_PX;
 }
 
-export function composeZombieGate(model: ZombieGateModel, hover: { x: number; y: number } | null = null): DrawCommand[] {
-    const cmds: DrawCommand[] = [];
-    const cameraY = cameraForPlayer(model.playerY);
-    const playerSide = sideForLane(model.playerLane);
+/** Cached floor geometry — avoid reallocating ~900 rect cmds every frame. */
+let floorCacheSnap = Number.NaN;
+let floorCacheCmds: DrawCommand[] = [];
 
-    // One Graphics node for the whole floor. Group by fill so the renderer
-    // batches tiles + pixel bevels with few fill() calls.
+function buildFloorTiles(floorSnap: number): DrawCommand[] {
+    if (floorSnap === floorCacheSnap && floorCacheCmds.length > 0) return floorCacheCmds;
     const floorByFill = new Map<string, DrawCommand[]>();
     const pushFloor = (id: string, x: number, y: number, w: number, h: number, fill: string) => {
         let bucket = floorByFill.get(fill);
@@ -89,45 +93,46 @@ export function composeZombieGate(model: ZombieGateModel, hover: { x: number; y:
         }
         bucket.push({ id, kind: 'rect', x, y, w, h, radius: 0, fill });
     };
-    const rowStart = Math.floor(cameraY) - 1;
-    const rowEnd = Math.ceil(cameraY + VISIBLE_ROWS);
+    const rowStart = floorSnap - 1;
+    const rowEnd = floorSnap + VISIBLE_ROWS + 1;
     const tw = TILE_W - CELL_GAP;
     const th = ROW_PX - CELL_GAP;
     for (let row = rowStart; row <= rowEnd; row++) {
         if (row < -2) continue;
-        const y = worldToScreenY(row, cameraY);
+        const y = worldToScreenY(row, floorSnap);
         if (y < -ROW_PX || y > H + ROW_PX) continue;
         for (let col = 0; col < BOARD_COLS; col++) {
             const isBorder = col === BORDER_LEFT || col === BORDER_RIGHT;
             const dark = (row + col) % 2 === 0;
-            const x = colToX(col);
-            // Soul Knight-ish stone: cool gray-teal, clear seams, hard bevel.
+            // Quiet stone — tiny contrast, no hard outline look.
             const fill = isBorder
-                ? (dark ? '#0a1016' : '#0e161e')
-                : (dark ? '#3a4e5c' : '#465a68');
-            const hi = isBorder ? '#182028' : (dark ? '#526878' : '#5e7484');
-            const shade = isBorder ? '#060a0e' : (dark ? '#2a3a46' : '#344650');
-            pushFloor(`f-${row}-${col}`, x, y, tw, th, fill);
-            pushFloor(`fh-${row}-${col}`, x, y - th * 0.5 + 1, tw - 2, 2, hi);
-            pushFloor(`fl-${row}-${col}`, x - tw * 0.5 + 1, y, 2, th - 2, hi);
-            pushFloor(`fs-${row}-${col}`, x, y + th * 0.5 - 1, tw - 2, 2, shade);
+                ? (dark ? '#121820' : '#151c24')
+                : (dark ? '#3a4a56' : '#3e4e5a');
+            pushFloor(`f-${row}-${col}`, colToX(col), y, tw, th, fill);
         }
     }
     const floorTiles: DrawCommand[] = [];
     for (const bucket of floorByFill.values()) floorTiles.push(...bucket);
+    floorCacheSnap = floorSnap;
+    floorCacheCmds = floorTiles;
+    return floorTiles;
+}
+
+export function composeZombieGate(model: ZombieGateModel, hover: { x: number; y: number } | null = null): DrawCommand[] {
+    const cmds: DrawCommand[] = [];
+    const cameraY = cameraForPlayer(model.playerY);
+    const playerSide = sideForLane(model.playerLane);
+
+    // Floor = 1 Graphics node; rebuild only when floorSnap changes (cached).
+    const floorSnap = Math.floor(cameraY);
+    const scrollY = (cameraY - floorSnap) * ROW_PX;
     cmds.push({
         id: 'floor',
         kind: 'graphicsBatch',
         x: W / 2, y: H / 2, w: W, h: H,
-        graphicsCommands: floorTiles,
-    });
-
-    // Soft lane hint only — tiles must stay the dominant scale cue.
-    cmds.push({
-        id: 'laneGlow', kind: 'rect',
-        x: laneToX(model.displayLane), y: H / 2,
-        w: CELL_W, h: H,
-        fill: '#3e5260', radius: 0,
+        floorSnap,
+        scrollY,
+        graphicsCommands: buildFloorTiles(floorSnap),
     });
 
     const bandY = worldToScreenY(model.playerY + 3.2, cameraY);
@@ -298,7 +303,7 @@ function drawWeaponCrate(cmds: DrawCommand[], crate: WeaponCrateEntity, cameraY:
         id: `crate-ribbon-${crate.id}`, kind: 'rect',
         x, y, w: 6, h: box, fill: '#ffe566', radius: 0,
     });
-    pushOutlinedText(cmds, `crate-icon-${crate.id}`, x, y - 4, '枪', 18, '#ffffff');
+    pushHudText(cmds, `crate-icon-${crate.id}`, x, y - 4, '枪', 18, '#ffffff');
     cmds.push({
         id: `crate-name-${crate.id}`, kind: 'text',
         x, y: y + 14, text: weapon.name, size: 11, bold: true, fill: '#fff6e8',
@@ -339,18 +344,15 @@ function drawEnemy(cmds: DrawCommand[], enemy: EnemyEntity, cameraY: number) {
     const size = enemy.kind === 'tank' ? TANK_DRAW_PX : ENEMY_DRAW_PX;
     const barW = Math.max(20, size - 4);
     cmds.push({
-        id: `enemy-shadow-${enemy.id}`, kind: 'ellipse',
-        x, y: y + size * 0.38, w: size * 0.65, h: 8, fill: '#000000', alpha: 0.35,
-    });
-    cmds.push({
         id: `enemy-${enemy.id}`, kind: 'image',
         x, y, w: size, h: size, asset: 'squirrel',
     });
-    if (enemy.hitFlash > 0) {
+    // Hit flash only — soft alpha shadows/flashes split Graphics batches and cost FPS.
+    if (enemy.hitFlash > 0.04) {
         cmds.push({
             id: `enemy-flash-${enemy.id}`, kind: 'rect',
             x, y, w: size * 0.9, h: size * 0.9,
-            fill: '#ffffff', alpha: Math.min(0.55, enemy.hitFlash * 4), radius: 2,
+            fill: '#ffffff', alpha: Math.min(0.45, enemy.hitFlash * 3), radius: 0,
         });
     }
     if (enemy.state === 'chase') {
@@ -359,17 +361,20 @@ function drawEnemy(cmds: DrawCommand[], enemy: EnemyEntity, cameraY: number) {
             x, y: y - size * 0.55, text: '!', size: 20, bold: true, fill: '#ff6b6b',
         });
     }
-    const ratio = Math.max(0, enemy.hp / enemy.maxHp);
-    cmds.push({
-        id: `hpbg-${enemy.id}`, kind: 'rect',
-        x, y: y + size * 0.58, w: barW, h: 5, fill: '#2a1010', radius: 0,
-    });
-    if (ratio > 0) {
+    // Skip full HP bars on normals — saves dozens of Graphics nodes per frame.
+    if (enemy.kind === 'tank' || enemy.hp < enemy.maxHp) {
+        const ratio = Math.max(0, enemy.hp / enemy.maxHp);
         cmds.push({
-            id: `hp-${enemy.id}`, kind: 'rect',
-            x: x - barW * 0.5 + (barW * ratio) * 0.5, y: y + size * 0.58, w: barW * ratio, h: 5,
-            fill: ratio < 0.35 ? '#ff5050' : '#ff9a4d', radius: 0,
+            id: `hpbg-${enemy.id}`, kind: 'rect',
+            x, y: y + size * 0.58, w: barW, h: 5, fill: '#2a1010', radius: 0,
         });
+        if (ratio > 0) {
+            cmds.push({
+                id: `hp-${enemy.id}`, kind: 'rect',
+                x: x - barW * 0.5 + (barW * ratio) * 0.5, y: y + size * 0.58, w: barW * ratio, h: 5,
+                fill: ratio < 0.35 ? '#ff5050' : '#ff9a4d', radius: 0,
+            });
+        }
     }
 }
 
@@ -402,14 +407,14 @@ function drawSquad(cmds: DrawCommand[], model: ZombieGateModel, cameraY: number)
     const stackX = Math.round(size * 0.38);
     const stackY = Math.round(size * 0.34);
 
-    // Soul Knight foot disc under squad (yellow/pink ring vibe).
+    // Opaque foot disc (no alpha — keeps primitive batching intact).
     cmds.push({
         id: 'squad-pad-out', kind: 'ellipse',
         x, y: y + size * 0.4, w: TILE_W * 1.15, h: 14, fill: '#141414',
     });
     cmds.push({
         id: 'squad-pad', kind: 'ellipse',
-        x, y: y + size * 0.4, w: TILE_W * 1.0, h: 10, fill: '#ffe566', alpha: 0.85,
+        x, y: y + size * 0.4, w: TILE_W * 1.0, h: 10, fill: '#e8c84a',
     });
 
     for (let i = 0; i < visual; i++) {
@@ -461,7 +466,7 @@ function pushPixelPlaque(
     });
 }
 
-/** Circular skill / action button like banner bottom-right icons. */
+/** Circular skill button: opaque only (alpha would split Graphics batches). */
 function pushPixelRing(
     cmds: DrawCommand[],
     id: string,
@@ -477,15 +482,12 @@ function pushPixelRing(
     });
     cmds.push({
         id: `${id}-disk`, kind: 'ellipse',
-        x, y, w: size, h: size, fill: lit ? '#5a5a5a' : '#3a3a3a',
-    });
-    cmds.push({
-        id: `${id}-core`, kind: 'ellipse',
-        x, y, w: size * 0.55, h: size * 0.55, fill: accent, alpha: lit ? 1 : 0.45,
+        x, y, w: size, h: size, fill: lit ? accent : '#3a3a3a',
     });
 }
 
-function pushOutlinedText(
+/** Plaques already have black chrome — one Label is enough (9× outline killed FPS). */
+function pushHudText(
     cmds: DrawCommand[],
     id: string,
     x: number,
@@ -493,16 +495,8 @@ function pushOutlinedText(
     text: string,
     size: number,
     fill: string,
-    alpha = 1,
 ) {
-    const outline = '#141414';
-    for (const [ox, oy] of [[-2, 0], [2, 0], [0, -2], [0, 2], [-2, -2], [2, 2], [-2, 2], [2, -2]]) {
-        cmds.push({
-            id: `${id}-o${ox}${oy}`, kind: 'text',
-            x: x + ox, y: y + oy, text, size, bold: true, fill: outline, alpha,
-        });
-    }
-    cmds.push({ id, kind: 'text', x, y, text, size, bold: true, fill, alpha });
+    cmds.push({ id, kind: 'text', x, y, text, size, bold: true, fill });
 }
 
 function drawFeedback(cmds: DrawCommand[], f: Feedback, cameraY: number) {
@@ -511,33 +505,35 @@ function drawFeedback(cmds: DrawCommand[], f: Feedback, cameraY: number) {
     const size = f.kind === 'damage' ? 22 : f.kind === 'gate' ? 28 : 24;
     const fill = f.kind === 'damage' ? '#ffe566'
         : f.good ? '#9dffb0' : '#ff8f8f';
-    pushOutlinedText(
-        cmds,
-        `fb-${f.id}`,
-        laneToX(f.lane),
-        worldToScreenY(f.y, cameraY) - 28 - rise,
-        f.text,
-        size,
-        fill,
-        Math.min(1, t * 1.4),
-    );
+    const x = laneToX(f.lane);
+    const y = worldToScreenY(f.y, cameraY) - 28 - rise;
+    const alpha = Math.min(1, t * 1.4);
+    // Single shadow offset, not 8-way outline (Label storm).
+    cmds.push({
+        id: `fb-${f.id}-s`, kind: 'text',
+        x: x + 2, y: y + 2, text: f.text, size, bold: true, fill: '#141414', alpha,
+    });
+    cmds.push({
+        id: `fb-${f.id}`, kind: 'text',
+        x, y, text: f.text, size, bold: true, fill, alpha,
+    });
 }
 
 function drawHud(cmds: DrawCommand[], model: ZombieGateModel) {
     const weapon = model.weapon;
     // Three separate plaques — matches SK segmented top UI, not one rounded bar.
     pushPixelPlaque(cmds, 'hudUnits', 120, 48, 168, 52, '#2b3540', '#7a8894');
-    pushOutlinedText(cmds, 'hudUnitsText', 120, 48, `人数 ${model.unitCount}`, 24, '#fff6e8');
+    pushHudText(cmds, 'hudUnitsText', 120, 48, `人数 ${model.unitCount}`, 24, '#fff6e8');
 
     pushPixelPlaque(cmds, 'hudWeapon', 360, 48, 220, 52, '#243038', weapon.color);
-    pushOutlinedText(cmds, 'hudWeaponName', 360, 36, weapon.name, 22, weapon.color);
+    pushHudText(cmds, 'hudWeaponName', 360, 36, weapon.name, 22, weapon.color);
     cmds.push({
         id: 'hudWeaponMeta', kind: 'text',
         x: 360, y: 58, text: `伤${weapon.damage} 弹${weapon.pellets}`, size: 14, bold: true, fill: '#d8e4ec',
     });
 
     pushPixelPlaque(cmds, 'hudTime', 600, 48, 140, 52, '#2b3540', '#7a8894');
-    pushOutlinedText(cmds, 'hudTimeText', 600, 48, `${Math.ceil(model.timeLeft)}s`, 24, '#b4ebf4');
+    pushHudText(cmds, 'hudTimeText', 600, 48, `${Math.ceil(model.timeLeft)}s`, 24, '#b4ebf4');
 
     // Chunky outlined progress rail.
     const progress = Math.min(1, model.elapsed / ZG_RULES.duration);
@@ -558,7 +554,7 @@ function drawHud(cmds: DrawCommand[], model: ZombieGateModel) {
     }
 
     pushPixelPlaque(cmds, 'hudScore', W / 2, H - 40, 360, 40, '#2b3540', '#7a8894');
-    pushOutlinedText(cmds, 'hudScoreText', W / 2, H - 40, `得分 ${model.score} · 击破 ${model.kills}`, 18, '#fff6e8');
+    pushHudText(cmds, 'hudScoreText', W / 2, H - 40, `得分 ${model.score} · 击破 ${model.kills}`, 18, '#fff6e8');
 }
 
 function drawPanel(
@@ -577,7 +573,7 @@ function drawPanel(
     const sub = model.phase === 'ready'
         ? '格子换道 · 过门成长 · 自动射击'
         : `得分 ${model.score}  人数峰值 ${model.peakUnits}`;
-    pushOutlinedText(cmds, 'title', W / 2, 710, title, 34, '#fff6e8');
+    pushHudText(cmds, 'title', W / 2, 710, title, 34, '#fff6e8');
     cmds.push({ id: 'sub', kind: 'text', x: W / 2, y: 758, text: sub, size: 18, bold: true, fill: '#c8b090' });
 
     const hot = !!(hover && hover.x >= 124 && hover.x <= 596 && hover.y >= 812 && hover.y <= 898);
@@ -595,7 +591,7 @@ function drawPanel(
         id: 'buttonHi', kind: 'rect',
         x: W / 2, y: 855 - 34, w: 340, h: 4, fill: '#7fd0e0', radius: 0,
     });
-    pushOutlinedText(
+    pushHudText(
         cmds,
         'buttonText',
         W / 2,
