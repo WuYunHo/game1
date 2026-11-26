@@ -58,7 +58,11 @@ npm test
 - 连续的矩形、圆形和多边形会合并到 Graphics 批次节点；鱼群使用 16 进化单位，避免大量 Sprite Draw Call，同时保留每个进化单位的角色精灵细节。
 - Cocos 适配层在等待界面只提交一次绘制；游戏进行时动态世界按引擎 60Hz 更新，地面、飞门和飞飞鼠共享同一时间轴。
 - `assets/scene/main.scene`：仅保留 UI Camera 和 Canvas；入口组件直接挂载 Canvas，保留原脚本 UUID。
-- `assets/resources/art/`：两张带透明通道的 Q 版角色精灵，按用户提供的两张参考图生成。`prompts.json` 保存提示词和来源路径。
+- `assets/resources/art/`：角色精灵 + `loading-banner.png`（大肥鱼击倒飞飞鼠加载海报）。`prompts.json` 保存提示词和来源路径。
+- `assets/scripts/LoadingUi.ts`：元气骑士风加载界面（banner 框 + 像素加载条），资源就绪且最短展示时间后进入开始面板。
+- `assets/scripts/MovePadUi.ts`：局内左右换道像素按钮（按住连跳一格）；与 A/D 共用 `left`/`right` 标志。
+- `assets/scripts/CombatHudUi.ts`：局内「按钮/手势」操控切换弹窗 + 暂停/继续图标；选择会写入本地存储。
+- `assets/resources/art/loading-splash.png` + `build-templates/wechatgame/splash.png`：替换 Cocos 引擎插屏（构建后生效；编辑器预览仍可能闪默认页）。`settings/v2/packages/builder.json` 的 `splash-setting` 指向该图；改图后可跑 `tools/sync-splash.ps1`。
 - `assets/scripts/LeaderboardService.ts`：微信好友排行榜桥接，AppID 为 `wx6f85dd560abdb2c6`；胜利时保存最高分，点击 `TOP` 打开排行榜。
 - `build-templates/wechatgame/openDataContext/`：微信开放数据域排行榜模板，构建微信小游戏时放入 `build/wechatgame/openDataContext`。
 - `wechatgame.config.json`：微信小游戏构建配置。Cocos 构建时填写同一个 AppID，并勾选生成开放数据域工程模板；再用微信开发者工具导入 `build/wechatgame` 进行预览和上传。

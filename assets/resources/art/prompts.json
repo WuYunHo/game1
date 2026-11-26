@@ -1,4 +1,4 @@
-﻿{
+{
   "style": "Soul Knight in-game pixel treatment on ORIGINAL character silhouettes only. Do not redesign shapes.",
   "pipeline": "tools/art-hd/*-hd.png → crop → 64px grid → flatten color steps → 1px outline → nearest upscale 256",
   "fish": {
@@ -12,5 +12,15 @@
     "source": "tools/art-hd/faker-squirrel-hd.png",
     "native": "tools/art-gen/squirrel-shape-64.png",
     "note": "Keep original Faker squirrel silhouette (hat/glasses/pear body); only pixelize."
+  },
+  "loadingBanner": {
+    "file": "assets/resources/art/loading-banner.png",
+    "note": "Soul Knight loading poster. STRICT likeness: hero = deepseek-fish (blue chibi girl hat IV), enemies = faker-squirrel (pear rodent flat-cap glasses). No literal fish body. Nearest-neighbor 720x404.",
+    "refs": ["tools/art-hd/deepseek-fish-hd.png", "tools/art-hd/faker-squirrel-hd.png", "assets/resources/art/deepseek-fish.png", "assets/resources/art/faker-squirrel.png"]
+  },
+  "loadingSplash": {
+    "file": "assets/resources/art/loading-splash.png",
+    "wechatTemplate": "build-templates/wechatgame/splash.png",
+    "note": "720x1280 engine splash: LoadingUi chrome around loading-banner.png (title + frame + bar at 35%)."
   }
 }

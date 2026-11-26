@@ -7,9 +7,17 @@ import {
     LB_UI, leaderboardButtonHit, leaderboardCloseHit, leaderboardPanelCenter,
     type LeaderboardRowView,
 } from './LeaderboardUi';
+import { MOVE_PAD, hitMovePad, movePadCenters, movePadHit } from './MovePadUi';
+import {
+    COMBAT_HUD, controlCloseHit, controlIconHit, controlOptionHit, controlPopupCenter,
+    pauseIconHit, type ControlMode,
+} from './CombatHudUi';
 
-export type { LeaderboardRowView };
-export { leaderboardButtonHit, leaderboardCloseHit };
+export type { LeaderboardRowView, ControlMode };
+export {
+    leaderboardButtonHit, leaderboardCloseHit, hitMovePad, movePadHit,
+    controlIconHit, pauseIconHit, controlOptionHit, controlCloseHit,
+};
 
 export type DrawCommand = {
     id: string;
@@ -158,10 +166,25 @@ export type LeaderboardViewState = {
     rows: LeaderboardRowView[];
 };
 
+export type MovePadViewState = {
+    left: boolean;
+    right: boolean;
+};
+
+export type CombatHudViewState = {
+    controlMode: ControlMode;
+    controlPopupOpen: boolean;
+    paused: boolean;
+};
+
 export function composeZombieGate(
     model: ZombieGateModel,
     hover: { x: number; y: number } | null = null,
     leaderboard: LeaderboardViewState = { open: false, rows: [] },
+    movePad: MovePadViewState = { left: false, right: false },
+    combatHud: CombatHudViewState = {
+        controlMode: 'buttons', controlPopupOpen: false, paused: false,
+    },
 ): DrawCommand[] {
     const cmds: DrawCommand[] = [];
     const cameraY = cameraForPlayer(model.playerY);
@@ -200,7 +223,7 @@ export function composeZombieGate(
 
     for (const f of model.feedback) drawFeedback(cmds, f, cameraY);
 
-    drawHud(cmds, model, hover, leaderboard.open);
+    drawHud(cmds, model, hover, leaderboard.open, movePad, combatHud);
 
     if (model.impact > 0) {
         cmds.push({
@@ -209,13 +232,18 @@ export function composeZombieGate(
         });
     }
 
+    if (combatHud.paused && (model.phase === 'playing' || model.phase === 'intro')) {
+        drawPauseOverlay(cmds);
+    }
+
     if (model.phase === 'intro') {
         ensureIntroBurst(model);
         drawIntroBurst(cmds, model);
-    } else if (model.phase !== 'playing' && !leaderboard.open) {
+    } else if (model.phase !== 'playing' && !leaderboard.open && !combatHud.controlPopupOpen) {
         drawPanel(cmds, model, hover);
     }
 
+    if (combatHud.controlPopupOpen) drawControlPopup(cmds, combatHud.controlMode, hover);
     if (leaderboard.open) drawLeaderboard(cmds, leaderboard.rows, hover);
 
     return cmds;
@@ -645,8 +673,11 @@ function drawHud(
     model: ZombieGateModel,
     hover: { x: number; y: number } | null,
     boardOpen: boolean,
+    movePad: MovePadViewState,
+    combatHud: CombatHudViewState,
 ) {
     const weapon = model.weapon;
+    const inCombat = model.phase === 'playing' || model.phase === 'intro';
     // Segmented top UI + leaderboard entry (SK plaques, not rounded pills).
     pushPixelPlaque(cmds, 'hudUnits', 108, 48, 150, 52, '#2b3540', '#7a8894');
     pushHudText(cmds, 'hudUnitsText', 108, 48, `人数 ${model.unitCount}`, 22, '#fff6e8');
@@ -694,8 +725,169 @@ function drawHud(
         });
     }
 
-    pushPixelPlaque(cmds, 'hudScore', W / 2, H - 40, 360, 40, '#2b3540', '#7a8894');
-    pushHudText(cmds, 'hudScoreText', W / 2, H - 40, `得分 ${model.score} · 击破 ${model.kills}`, 18, '#fff6e8');
+    if (inCombat && !boardOpen) {
+        drawCombatUtilityIcons(cmds, hover, combatHud);
+    }
+
+    // Narrower score so bottom-corner lane pads stay clear.
+    const scoreY = model.phase === 'playing' ? H - 44 : H - 40;
+    const scoreW = model.phase === 'playing' ? 300 : 360;
+    pushPixelPlaque(cmds, 'hudScore', W / 2, scoreY, scoreW, 40, '#2b3540', '#7a8894');
+    pushHudText(cmds, 'hudScoreText', W / 2, scoreY, `得分 ${model.score} · 击破 ${model.kills}`, 18, '#fff6e8');
+
+    const showPads = model.phase === 'playing'
+        && !boardOpen
+        && !combatHud.paused
+        && !combatHud.controlPopupOpen
+        && combatHud.controlMode === 'buttons';
+    if (showPads) drawMovePad(cmds, hover, movePad);
+}
+
+function drawCombatUtilityIcons(
+    cmds: DrawCommand[],
+    hover: { x: number; y: number } | null,
+    combatHud: CombatHudViewState,
+) {
+    const ctrl = controlIconHit();
+    const ctrlHot = !!(hover && hover.x >= ctrl.x0 && hover.x <= ctrl.x1
+        && hover.y >= ctrl.y0 && hover.y <= ctrl.y1);
+    const ctrlOpen = combatHud.controlPopupOpen;
+    pushPixelPlaque(
+        cmds, 'hudControl', ctrl.cx, ctrl.cy,
+        ctrlHot || ctrlOpen ? COMBAT_HUD.iconW + 6 : COMBAT_HUD.iconW,
+        ctrlHot || ctrlOpen ? COMBAT_HUD.iconH + 4 : COMBAT_HUD.iconH,
+        ctrlOpen ? '#2a7f94' : '#2b3540',
+        ctrlHot ? '#7fd0e0' : '#7a8894',
+    );
+    pushHudText(
+        cmds, 'hudControlText', ctrl.cx, ctrl.cy,
+        combatHud.controlMode === 'buttons' ? '按钮' : '手势',
+        16, '#fff6e8',
+    );
+
+    const pause = pauseIconHit();
+    const pauseHot = !!(hover && hover.x >= pause.x0 && hover.x <= pause.x1
+        && hover.y >= pause.y0 && hover.y <= pause.y1);
+    pushPixelPlaque(
+        cmds, 'hudPause', pause.cx, pause.cy,
+        pauseHot || combatHud.paused ? COMBAT_HUD.iconW + 6 : COMBAT_HUD.iconW,
+        pauseHot || combatHud.paused ? COMBAT_HUD.iconH + 4 : COMBAT_HUD.iconH,
+        combatHud.paused ? '#2a7f94' : '#2b3540',
+        pauseHot ? '#7fd0e0' : '#7a8894',
+    );
+    pushHudText(
+        cmds, 'hudPauseText', pause.cx, pause.cy,
+        combatHud.paused ? '继续' : '暂停',
+        16, '#fff6e8',
+    );
+}
+
+function drawPauseOverlay(cmds: DrawCommand[]) {
+    cmds.push({
+        id: 'pauseScrim', kind: 'rect',
+        x: W / 2, y: H / 2, w: W, h: H, fill: '#0a1218', alpha: 0.45, radius: 0,
+    });
+    pushPixelPlaque(cmds, 'pauseBadge', W / 2, Math.round(H * 0.42), 280, 72, '#1a242c', '#7a8894');
+    pushHudText(cmds, 'pauseBadgeText', W / 2, Math.round(H * 0.42), '已暂停', 30, '#fff6e8');
+}
+
+function drawControlPopup(
+    cmds: DrawCommand[],
+    mode: ControlMode,
+    hover: { x: number; y: number } | null,
+) {
+    const { x, y } = controlPopupCenter(H);
+    cmds.push({
+        id: 'ctrlScrim', kind: 'rect',
+        x: W / 2, y: H / 2, w: W, h: H, fill: '#0a1218', alpha: 0.55, radius: 0,
+    });
+    pushPixelPlaque(cmds, 'ctrlPanel', x, y, COMBAT_HUD.popupW, COMBAT_HUD.popupH, '#1a242c', '#6a7a88');
+    cmds.push({
+        id: 'ctrlInner', kind: 'rect',
+        x, y, w: COMBAT_HUD.popupW - 28, h: COMBAT_HUD.popupH - 28, fill: '#121820', radius: 0,
+    });
+    pushHudText(cmds, 'ctrlTitle', x, y - 130, '操控方式', 28, '#fff6e8');
+    cmds.push({
+        id: 'ctrlSub', kind: 'text',
+        x, y: y - 96, text: '选择局内左右换道方式', size: 16, bold: true, fill: '#8a9aa4',
+    });
+
+    drawControlOption(cmds, 0, '按钮换道', '屏幕左右键 · 按住连跳', mode === 'buttons', hover);
+    drawControlOption(cmds, 1, '手势拖动', '手指左右滑动跟指换格', mode === 'gesture', hover);
+
+    const close = controlCloseHit(H);
+    const closeHot = !!(hover && hover.x >= close.x0 && hover.x <= close.x1
+        && hover.y >= close.y0 && hover.y <= close.y1);
+    cmds.push({
+        id: 'ctrlCloseOut', kind: 'rect',
+        x: close.cx, y: close.cy, w: 288, h: 80, fill: '#141414', radius: 0,
+    });
+    cmds.push({
+        id: 'ctrlClose', kind: 'rect',
+        x: close.cx, y: close.cy, w: closeHot ? 286 : 280, h: closeHot ? 76 : 72,
+        fill: closeHot ? '#3aa0b8' : '#2a7f94', radius: 0,
+    });
+    pushHudText(cmds, 'ctrlCloseText', close.cx, close.cy, '关闭', 24, '#ffffff');
+}
+
+function drawControlOption(
+    cmds: DrawCommand[],
+    index: 0 | 1,
+    title: string,
+    sub: string,
+    selected: boolean,
+    hover: { x: number; y: number } | null,
+) {
+    const hit = controlOptionHit(H, index);
+    const hot = !!(hover && hover.x >= hit.x0 && hover.x <= hit.x1
+        && hover.y >= hit.y0 && hover.y <= hit.y1);
+    pushPixelPlaque(
+        cmds, `ctrlOpt${index}`, hit.cx, hit.cy,
+        COMBAT_HUD.optionW, COMBAT_HUD.optionH,
+        selected ? '#243840' : '#1c2830',
+        hot || selected ? '#3aa0b8' : '#4a5a64',
+    );
+    pushHudText(cmds, `ctrlOptTitle${index}`, hit.cx - 40, hit.cy - 10, title, 20, selected ? '#fff6e8' : '#d8e4ec');
+    cmds.push({
+        id: `ctrlOptSub${index}`, kind: 'text',
+        x: hit.cx - 40, y: hit.cy + 16, text: sub, size: 14, bold: true, fill: '#8a9aa4',
+    });
+    if (selected) {
+        pushHudText(cmds, `ctrlOptMark${index}`, hit.cx + 160, hit.cy, '✓', 24, '#7fd0e0');
+    }
+}
+
+/** Discrete ◀ ▶ plaques — hold to repeat shiftLane via input flags. */
+function drawMovePad(
+    cmds: DrawCommand[],
+    hover: { x: number; y: number } | null,
+    movePad: MovePadViewState,
+) {
+    const { left, right } = movePadCenters(H);
+    drawMoveButton(cmds, 'moveL', left.cx, left.cy, '◀', movePad.left, hover);
+    drawMoveButton(cmds, 'moveR', right.cx, right.cy, '▶', movePad.right, hover);
+}
+
+function drawMoveButton(
+    cmds: DrawCommand[],
+    id: string,
+    cx: number,
+    cy: number,
+    label: string,
+    pressed: boolean,
+    hover: { x: number; y: number } | null,
+) {
+    const hot = !!(hover && Math.abs(hover.x - cx) <= MOVE_PAD.buttonW * 0.5 + 8
+        && Math.abs(hover.y - cy) <= MOVE_PAD.buttonH * 0.5 + 8);
+    const lit = pressed || hot;
+    const w = lit ? MOVE_PAD.buttonW + 6 : MOVE_PAD.buttonW;
+    const h = lit ? MOVE_PAD.buttonH + 4 : MOVE_PAD.buttonH;
+    pushPixelPlaque(cmds, id, cx, cy, w, h, pressed ? '#2a7f94' : '#2b3540', lit ? '#7fd0e0' : '#7a8894');
+    pushHudText(cmds, `${id}Glyph`, cx, cy - 2, label, 40, '#fff6e8');
+    cmds.push({
+        id: `${id}Hint`, kind: 'text',
+        x: cx, y: cy + 34, text: id === 'moveL' ? '左' : '右', size: 14, bold: true, fill: '#8a9aa4',
+    });
 }
 
 function drawPanel(
