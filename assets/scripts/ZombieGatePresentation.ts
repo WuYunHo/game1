@@ -17,23 +17,34 @@ export type DrawCommand = {
 
 const W = 720;
 const H = 1280;
-/** Full-bleed board: 12 columns fill the screen; col 0 / 11 are side borders. */
-export const BOARD_COLS = 12;
+/**
+ * Denser Soul Knight-like floor: more / smaller tiles.
+ * 22 cols = borders + 5 lanes × 4 tiles (playable 1..20).
+ */
+export const BOARD_COLS = 22;
 export const BORDER_LEFT = 0;
 export const BORDER_RIGHT = BOARD_COLS - 1;
-/** Playable columns 1..10 → 5 logical lanes × 2 tiles. */
-export const TILES_PER_LANE = 2;
+/** Playable columns 1..20 → 5 logical lanes × 4 tiles. */
+export const TILES_PER_LANE = 4;
 export const PLAYABLE_FIRST_COL = 1;
 const CELL_GAP = 2;
-const TILE_W = W / BOARD_COLS;
+export const TILE_W = W / BOARD_COLS;
 /** Square tiles so the checkerboard can fill the screen edge-to-edge. */
 const ROW_PX = TILE_W;
 const LANE_W = TILE_W * TILES_PER_LANE;
 const CELL_W = LANE_W - CELL_GAP;
-const GATE_H = Math.max(14, (ROW_PX - CELL_GAP) * 0.5);
-/** Equal-width gates: 5 playable tiles each (same type / footprint). */
-export const GATE_COLS_LEFT = [1, 2, 3, 4, 5] as const;
-export const GATE_COLS_RIGHT = [6, 7, 8, 9, 10] as const;
+const GATE_H = Math.max(12, (ROW_PX - CELL_GAP) * 0.55);
+/**
+ * Character ≈ 1.5~2 tiles (Soul Knight: unit covers ~2×2 small floor cells).
+ * Tile ≈ 32.7px → fish ~1.75, fly ~1.85, tank ~2.1 tiles.
+ */
+export const FISH_DRAW_PX = 56;
+export const ENEMY_DRAW_PX = 60;
+export const TANK_DRAW_PX = 68;
+/** Equal-width gates: 10 playable tiles each. */
+export const GATE_COLS_LEFT = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
+export const GATE_COLS_RIGHT = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20] as const;
+const GATE_TILES = GATE_COLS_LEFT.length;
 /** Player sits near lower third; camera scrolls the full-height board. */
 const PLAYER_SCREEN_Y = H * 0.72;
 const VISIBLE_ROWS = Math.ceil(H / ROW_PX) + 2;
@@ -42,10 +53,10 @@ export function colToX(col: number): number {
     return (col + 0.5) * TILE_W;
 }
 
-/** Logical lane 0..4 → center X inside playable columns 1..10. */
+/** Logical lane 0..4 → center X inside that lane's tile span. */
 export function laneToX(lane: number): number {
     const firstCol = PLAYABLE_FIRST_COL + lane * TILES_PER_LANE;
-    return (firstCol + 1) * TILE_W;
+    return (firstCol + TILES_PER_LANE * 0.5) * TILE_W;
 }
 
 export function laneFromX(x: number): number {
@@ -67,9 +78,17 @@ export function composeZombieGate(model: ZombieGateModel, hover: { x: number; y:
     const cameraY = cameraForPlayer(model.playerY);
     const playerSide = sideForLane(model.playerLane);
 
-    // One Graphics node for the whole floor. Tiles are grouped by fill color so
-    // the renderer can issue ~4 fill() calls instead of one per cell.
+    // One Graphics node for the whole floor. Group by fill so the renderer
+    // batches tiles + pixel bevels with few fill() calls.
     const floorByFill = new Map<string, DrawCommand[]>();
+    const pushFloor = (id: string, x: number, y: number, w: number, h: number, fill: string) => {
+        let bucket = floorByFill.get(fill);
+        if (!bucket) {
+            bucket = [];
+            floorByFill.set(fill, bucket);
+        }
+        bucket.push({ id, kind: 'rect', x, y, w, h, radius: 0, fill });
+    };
     const rowStart = Math.floor(cameraY) - 1;
     const rowEnd = Math.ceil(cameraY + VISIBLE_ROWS);
     const tw = TILE_W - CELL_GAP;
@@ -81,18 +100,17 @@ export function composeZombieGate(model: ZombieGateModel, hover: { x: number; y:
         for (let col = 0; col < BOARD_COLS; col++) {
             const isBorder = col === BORDER_LEFT || col === BORDER_RIGHT;
             const dark = (row + col) % 2 === 0;
+            const x = colToX(col);
+            // Soul Knight-ish stone: cool gray-teal, clear seams, hard bevel.
             const fill = isBorder
-                ? (dark ? '#0c141c' : '#101820')
-                : (dark ? '#1f3a48' : '#1a323e');
-            let bucket = floorByFill.get(fill);
-            if (!bucket) {
-                bucket = [];
-                floorByFill.set(fill, bucket);
-            }
-            bucket.push({
-                id: `f-${row}-${col}`, kind: 'rect',
-                x: colToX(col), y, w: tw, h: th, radius: 0, fill,
-            });
+                ? (dark ? '#0a1016' : '#0e161e')
+                : (dark ? '#3a4e5c' : '#465a68');
+            const hi = isBorder ? '#182028' : (dark ? '#526878' : '#5e7484');
+            const shade = isBorder ? '#060a0e' : (dark ? '#2a3a46' : '#344650');
+            pushFloor(`f-${row}-${col}`, x, y, tw, th, fill);
+            pushFloor(`fh-${row}-${col}`, x, y - th * 0.5 + 1, tw - 2, 2, hi);
+            pushFloor(`fl-${row}-${col}`, x - tw * 0.5 + 1, y, 2, th - 2, hi);
+            pushFloor(`fs-${row}-${col}`, x, y + th * 0.5 - 1, tw - 2, 2, shade);
         }
     }
     const floorTiles: DrawCommand[] = [];
@@ -104,27 +122,28 @@ export function composeZombieGate(model: ZombieGateModel, hover: { x: number; y:
         graphicsCommands: floorTiles,
     });
 
-    // Opaque lane / side hints (no alpha — keeps later primitive batching intact).
+    // Soft lane hint only — tiles must stay the dominant scale cue.
     cmds.push({
         id: 'laneGlow', kind: 'rect',
         x: laneToX(model.displayLane), y: H / 2,
-        w: CELL_W + 4, h: H,
-        fill: '#243f4c', radius: 0,
+        w: CELL_W, h: H,
+        fill: '#3e5260', radius: 0,
     });
 
     const bandY = worldToScreenY(model.playerY + 3.2, cameraY);
-    const leftBandX = (colToX(GATE_COLS_LEFT[0]) + colToX(GATE_COLS_LEFT[4])) / 2;
-    const rightBandX = (colToX(GATE_COLS_RIGHT[0]) + colToX(GATE_COLS_RIGHT[4])) / 2;
+    const leftBandX = (colToX(GATE_COLS_LEFT[0]) + colToX(GATE_COLS_LEFT[GATE_TILES - 1])) / 2;
+    const rightBandX = (colToX(GATE_COLS_RIGHT[0]) + colToX(GATE_COLS_RIGHT[GATE_TILES - 1])) / 2;
+    const bandW = TILE_W * GATE_TILES - 4;
     cmds.push({
         id: 'sideLeft', kind: 'rect',
         x: leftBandX, y: bandY,
-        w: TILE_W * 5 - 4, h: 6,
+        w: bandW, h: 6,
         fill: playerSide === 'left' ? '#3aa0b8' : '#2a4552', radius: 0,
     });
     cmds.push({
         id: 'sideRight', kind: 'rect',
         x: rightBandX, y: bandY,
-        w: TILE_W * 5 - 4, h: 6,
+        w: bandW, h: 6,
         fill: playerSide === 'right' ? '#3aa0b8' : '#2a4552', radius: 0,
     });
 
@@ -178,7 +197,7 @@ function drawGate(
 ) {
     const y = worldToScreenY(gate.row, cameraY);
     if (y < -60 || y > H + 60) return;
-    // Both sides are the same type: exactly 5 board tiles wide.
+    // Both sides are the same type / footprint (GATE_TILES each).
     const cols = gate.side === 'left' ? GATE_COLS_LEFT : GATE_COLS_RIGHT;
     const approaching = !gate.resolved && gate.row - model.playerY < 5 && gate.row >= model.playerY - 0.2;
     const chosenSide = approaching && gate.side === playerSide;
@@ -198,16 +217,17 @@ function drawGate(
     const brickH = GATE_H;
     const midX = (colToX(cols[0]) + colToX(cols[cols.length - 1])) / 2;
 
+    const gateW = TILE_W * GATE_TILES - 2;
     // Pixel frame rails (hard edges, no radius).
     cmds.push({
         id: `gate-rail-top-${gate.id}`, kind: 'rect',
         x: midX, y: y - brickH * 0.5 - 3,
-        w: TILE_W * 5 - 2, h: 3, fill: outline, radius: 0,
+        w: gateW, h: 3, fill: outline, radius: 0,
     });
     cmds.push({
         id: `gate-rail-bot-${gate.id}`, kind: 'rect',
         x: midX, y: y + brickH * 0.5 + 3,
-        w: TILE_W * 5 - 2, h: 3, fill: outline, radius: 0,
+        w: gateW, h: 3, fill: outline, radius: 0,
     });
 
     for (let i = 0; i < cols.length; i++) {
@@ -260,40 +280,54 @@ function drawWeaponCrate(cmds: DrawCommand[], crate: WeaponCrateEntity, cameraY:
     if (y < -60 || y > H + 60) return;
     const weapon = WEAPONS[crate.tier] ?? WEAPONS[1];
     const ratio = Math.max(0, crate.hp / crate.maxHp);
-    const crateH = Math.max(GATE_H + 8, ROW_PX - 6);
+    // Gift-box footprint ≈ 1.5 tiles (banner top gifts), hard black outline.
+    const box = Math.round(TILE_W * 1.55);
+    cmds.push({
+        id: `crate-out-${crate.id}`, kind: 'rect',
+        x, y, w: box + 6, h: box + 6, fill: '#141414', radius: 0,
+    });
     cmds.push({
         id: `crate-${crate.id}`, kind: 'rect',
-        x, y, w: CELL_W - 8, h: crateH,
-        fill: '#5a3d8a', stroke: weapon.color, line: 2, radius: 3,
+        x, y, w: box, h: box, fill: '#5a3d8a', radius: 0,
     });
     cmds.push({
-        id: `crate-icon-${crate.id}`, kind: 'text',
-        x, y: y - 6, text: '枪', size: 20, bold: true, fill: weapon.color,
+        id: `crate-lid-${crate.id}`, kind: 'rect',
+        x, y: y - box * 0.28, w: box, h: Math.round(box * 0.28), fill: weapon.color, radius: 0,
     });
+    cmds.push({
+        id: `crate-ribbon-${crate.id}`, kind: 'rect',
+        x, y, w: 6, h: box, fill: '#ffe566', radius: 0,
+    });
+    pushOutlinedText(cmds, `crate-icon-${crate.id}`, x, y - 4, '枪', 18, '#ffffff');
     cmds.push({
         id: `crate-name-${crate.id}`, kind: 'text',
-        x, y: y + 10, text: weapon.name, size: 13, bold: true, fill: '#ffffff',
+        x, y: y + 14, text: weapon.name, size: 11, bold: true, fill: '#fff6e8',
+    });
+    const barW = box - 8;
+    cmds.push({
+        id: `crate-hpout-${crate.id}`, kind: 'rect',
+        x, y: y + box * 0.42, w: barW + 4, h: 8, fill: '#141414', radius: 0,
     });
     cmds.push({
         id: `crate-hpbg-${crate.id}`, kind: 'rect',
-        x, y: y + crateH * 0.42, w: 52, h: 6, fill: '#2a1010', radius: 2,
+        x, y: y + box * 0.42, w: barW, h: 4, fill: '#2a1010', radius: 0,
     });
     if (ratio > 0) {
         cmds.push({
             id: `crate-hp-${crate.id}`, kind: 'rect',
-            x: x - 26 + 26 * ratio, y: y + crateH * 0.42, w: 52 * ratio, h: 6,
-            fill: weapon.color, radius: 2,
+            x: x - barW * 0.5 + (barW * ratio) * 0.5, y: y + box * 0.42, w: barW * ratio, h: 4,
+            fill: weapon.color, radius: 0,
         });
     }
     cmds.push({
         id: `crate-hptext-${crate.id}`, kind: 'text',
-        x, y: y + crateH * 0.58, text: `${Math.ceil(crate.hp)}`, size: 12, fill: '#e8f7ff',
+        x, y: y + box * 0.58, text: `${Math.ceil(crate.hp)}`, size: 11, bold: true, fill: '#fff6e8',
     });
     if (crate.hitFlash > 0) {
         cmds.push({
             id: `crate-flash-${crate.id}`, kind: 'rect',
-            x, y, w: CELL_W - 4, h: crateH + 2,
-            fill: '#ffffff', alpha: Math.min(0.5, crate.hitFlash * 4), radius: 3,
+            x, y, w: box + 2, h: box + 2,
+            fill: '#ffffff', alpha: Math.min(0.5, crate.hitFlash * 4), radius: 0,
         });
     }
 }
@@ -302,11 +336,11 @@ function drawEnemy(cmds: DrawCommand[], enemy: EnemyEntity, cameraY: number) {
     const x = Math.round(laneToX(enemy.displayLane) + enemy.ox * LANE_W);
     const y = Math.round(worldToScreenY(enemy.y, cameraY));
     if (y < -60 || y > H + 60) return;
-    // Even pixel sizes keep nearest-neighbor sprites blocky.
-    const size = enemy.kind === 'tank' ? 64 : 48;
+    const size = enemy.kind === 'tank' ? TANK_DRAW_PX : ENEMY_DRAW_PX;
+    const barW = Math.max(20, size - 4);
     cmds.push({
         id: `enemy-shadow-${enemy.id}`, kind: 'ellipse',
-        x, y: y + size * 0.35, w: size * 0.7, h: 12, fill: '#000000', alpha: 0.35,
+        x, y: y + size * 0.38, w: size * 0.65, h: 8, fill: '#000000', alpha: 0.35,
     });
     cmds.push({
         id: `enemy-${enemy.id}`, kind: 'image',
@@ -322,19 +356,19 @@ function drawEnemy(cmds: DrawCommand[], enemy: EnemyEntity, cameraY: number) {
     if (enemy.state === 'chase') {
         cmds.push({
             id: `aggro-${enemy.id}`, kind: 'text',
-            x, y: y - size * 0.55, text: '!', size: 28, bold: true, fill: '#ff6b6b',
+            x, y: y - size * 0.55, text: '!', size: 20, bold: true, fill: '#ff6b6b',
         });
     }
     const ratio = Math.max(0, enemy.hp / enemy.maxHp);
     cmds.push({
         id: `hpbg-${enemy.id}`, kind: 'rect',
-        x, y: y + size * 0.55, w: 48, h: 8, fill: '#2a1010', radius: 2,
+        x, y: y + size * 0.58, w: barW, h: 5, fill: '#2a1010', radius: 0,
     });
     if (ratio > 0) {
         cmds.push({
             id: `hp-${enemy.id}`, kind: 'rect',
-            x: x - 24 + 24 * ratio, y: y + size * 0.55, w: 48 * ratio, h: 8,
-            fill: ratio < 0.35 ? '#ff5050' : '#ff9a4d', radius: 2,
+            x: x - barW * 0.5 + (barW * ratio) * 0.5, y: y + size * 0.58, w: barW * ratio, h: 5,
+            fill: ratio < 0.35 ? '#ff5050' : '#ff9a4d', radius: 0,
         });
     }
 }
@@ -364,94 +398,167 @@ function drawSquad(cmds: DrawCommand[], model: ZombieGateModel, cameraY: number)
     const y = worldToScreenY(model.playerY, cameraY);
     const visual = Math.min(model.unitCount, 8);
     const weapon = model.weapon;
+    const size = FISH_DRAW_PX;
+    const stackX = Math.round(size * 0.38);
+    const stackY = Math.round(size * 0.34);
 
-    // Soft ground marker under squad.
+    // Soul Knight foot disc under squad (yellow/pink ring vibe).
     cmds.push({
-        id: 'squad-pad', kind: 'rect',
-        x, y: y + 28, w: CELL_W * 0.92, h: 16,
-        fill: weapon.color, alpha: 0.22, radius: 3,
+        id: 'squad-pad-out', kind: 'ellipse',
+        x, y: y + size * 0.4, w: TILE_W * 1.15, h: 14, fill: '#141414',
+    });
+    cmds.push({
+        id: 'squad-pad', kind: 'ellipse',
+        x, y: y + size * 0.4, w: TILE_W * 1.0, h: 10, fill: '#ffe566', alpha: 0.85,
     });
 
     for (let i = 0; i < visual; i++) {
-        const ox = ((i % 3) - 1) * 16;
-        const oy = -Math.floor(i / 3) * 14;
+        const ox = ((i % 3) - 1) * stackX;
+        const oy = -Math.floor(i / 3) * stackY;
         cmds.push({
             id: `unit-${i}`, kind: 'image',
-            x: Math.round(x + ox), y: Math.round(y + oy), w: 48, h: 48, asset: 'fish',
+            x: Math.round(x + ox), y: Math.round(y + oy), w: size, h: size, asset: 'fish',
         });
     }
     if (model.unitCount > 8) {
         cmds.push({
             id: 'unit-more', kind: 'text',
-            x: x + 42, y: y - 36, text: `×${model.unitCount}`, size: 22, bold: true, fill: weapon.color,
+            x: x + size * 0.75, y: y - size * 0.7, text: `×${model.unitCount}`, size: 16, bold: true, fill: weapon.color,
         });
     }
 
-    // Weapon tier pips with empty slots visible.
+    // Soul Knight skill-ring weapon pips (chunky black outline + grey disc).
     for (let t = 0; t <= ZG_RULES.maxWeaponTier; t++) {
         const on = t <= model.weaponTier;
+        const px = x - 34 + t * 34;
+        const py = y + size * 0.78;
+        pushPixelRing(cmds, `wpip-${t}`, px, py, 28, on ? (WEAPONS[t]?.color ?? '#ffe566') : '#6a6a6a', on);
+    }
+}
+
+/** Soul Knight UI: hard black outline plaque (no rounded app chrome). */
+function pushPixelPlaque(
+    cmds: DrawCommand[],
+    id: string,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    fill: string,
+    hi = '#6a7a88',
+) {
+    cmds.push({
+        id: `${id}-out`, kind: 'rect',
+        x, y, w: w + 6, h: h + 6, fill: '#141414', radius: 0,
+    });
+    cmds.push({
+        id: `${id}-body`, kind: 'rect',
+        x, y, w, h, fill, radius: 0,
+    });
+    cmds.push({
+        id: `${id}-hi`, kind: 'rect',
+        x, y: y - h * 0.5 + 2, w: w - 4, h: 3, fill: hi, radius: 0,
+    });
+}
+
+/** Circular skill / action button like banner bottom-right icons. */
+function pushPixelRing(
+    cmds: DrawCommand[],
+    id: string,
+    x: number,
+    y: number,
+    size: number,
+    accent: string,
+    lit: boolean,
+) {
+    cmds.push({
+        id: `${id}-out`, kind: 'ellipse',
+        x, y, w: size + 6, h: size + 6, fill: '#141414',
+    });
+    cmds.push({
+        id: `${id}-disk`, kind: 'ellipse',
+        x, y, w: size, h: size, fill: lit ? '#5a5a5a' : '#3a3a3a',
+    });
+    cmds.push({
+        id: `${id}-core`, kind: 'ellipse',
+        x, y, w: size * 0.55, h: size * 0.55, fill: accent, alpha: lit ? 1 : 0.45,
+    });
+}
+
+function pushOutlinedText(
+    cmds: DrawCommand[],
+    id: string,
+    x: number,
+    y: number,
+    text: string,
+    size: number,
+    fill: string,
+    alpha = 1,
+) {
+    const outline = '#141414';
+    for (const [ox, oy] of [[-2, 0], [2, 0], [0, -2], [0, 2], [-2, -2], [2, 2], [-2, 2], [2, -2]]) {
         cmds.push({
-            id: `wpip-${t}`, kind: 'rect',
-            x: x - 30 + t * 22, y: y + 46, w: 16, h: 10,
-            fill: on ? (WEAPONS[t]?.color ?? '#ffe566') : '#2a3a44',
-            stroke: on ? '#ffffff' : '#1a242c',
-            line: 1,
-            radius: 2,
+            id: `${id}-o${ox}${oy}`, kind: 'text',
+            x: x + ox, y: y + oy, text, size, bold: true, fill: outline, alpha,
         });
     }
+    cmds.push({ id, kind: 'text', x, y, text, size, bold: true, fill, alpha });
 }
 
 function drawFeedback(cmds: DrawCommand[], f: Feedback, cameraY: number) {
     const t = f.life / f.maxLife;
     const rise = (1 - t) * (f.kind === 'damage' ? 36 : f.kind === 'gate' ? 28 : 20);
-    const size = f.kind === 'damage' ? 22 : f.kind === 'gate' ? 30 : 26;
+    const size = f.kind === 'damage' ? 22 : f.kind === 'gate' ? 28 : 24;
     const fill = f.kind === 'damage' ? '#ffe566'
         : f.good ? '#9dffb0' : '#ff8f8f';
-    cmds.push({
-        id: `fb-${f.id}`, kind: 'text',
-        x: laneToX(f.lane),
-        y: worldToScreenY(f.y, cameraY) - 28 - rise,
-        text: f.text, size, bold: true, fill,
-        alpha: Math.min(1, t * 1.4),
-    });
+    pushOutlinedText(
+        cmds,
+        `fb-${f.id}`,
+        laneToX(f.lane),
+        worldToScreenY(f.y, cameraY) - 28 - rise,
+        f.text,
+        size,
+        fill,
+        Math.min(1, t * 1.4),
+    );
 }
 
 function drawHud(cmds: DrawCommand[], model: ZombieGateModel) {
     const weapon = model.weapon;
-    cmds.push({
-        id: 'hudPanel', kind: 'rect',
-        x: W / 2, y: 52, w: 680, h: 72, fill: '#0f1f28', radius: 10, stroke: '#2a4a58', line: 2,
-    });
-    cmds.push({
-        id: 'hudUnits', kind: 'text',
-        x: 118, y: 52, text: `人数 ${model.unitCount}`, size: 28, bold: true, fill: '#e8f7ff',
-    });
-    cmds.push({
-        id: 'hudWeapon', kind: 'text',
-        x: 340, y: 40, text: weapon.name, size: 24, bold: true, fill: weapon.color,
-    });
+    // Three separate plaques — matches SK segmented top UI, not one rounded bar.
+    pushPixelPlaque(cmds, 'hudUnits', 120, 48, 168, 52, '#2b3540', '#7a8894');
+    pushOutlinedText(cmds, 'hudUnitsText', 120, 48, `人数 ${model.unitCount}`, 24, '#fff6e8');
+
+    pushPixelPlaque(cmds, 'hudWeapon', 360, 48, 220, 52, '#243038', weapon.color);
+    pushOutlinedText(cmds, 'hudWeaponName', 360, 36, weapon.name, 22, weapon.color);
     cmds.push({
         id: 'hudWeaponMeta', kind: 'text',
-        x: 340, y: 66, text: `伤害${weapon.damage} · 弹${weapon.pellets}`, size: 16, fill: '#9ec8d4',
+        x: 360, y: 58, text: `伤${weapon.damage} 弹${weapon.pellets}`, size: 14, bold: true, fill: '#d8e4ec',
     });
-    cmds.push({
-        id: 'hudTime', kind: 'text',
-        x: 560, y: 52, text: `${Math.ceil(model.timeLeft)}s`, size: 28, bold: true, fill: '#b4ebf4',
-    });
-    // Progress bar along bottom of HUD.
+
+    pushPixelPlaque(cmds, 'hudTime', 600, 48, 140, 52, '#2b3540', '#7a8894');
+    pushOutlinedText(cmds, 'hudTimeText', 600, 48, `${Math.ceil(model.timeLeft)}s`, 24, '#b4ebf4');
+
+    // Chunky outlined progress rail.
     const progress = Math.min(1, model.elapsed / ZG_RULES.duration);
     cmds.push({
+        id: 'hudProgressOut', kind: 'rect',
+        x: W / 2, y: 92, w: 644, h: 14, fill: '#141414', radius: 0,
+    });
+    cmds.push({
         id: 'hudProgressBg', kind: 'rect',
-        x: W / 2, y: 88, w: 640, h: 6, fill: '#1a2c36', radius: 2,
+        x: W / 2, y: 92, w: 636, h: 8, fill: '#1a242c', radius: 0,
     });
-    cmds.push({
-        id: 'hudProgress', kind: 'rect',
-        x: 40 + 320 * progress, y: 88, w: 640 * progress, h: 6, fill: weapon.color, radius: 2,
-    });
-    cmds.push({
-        id: 'hudScore', kind: 'text',
-        x: W / 2, y: H - 36, text: `得分 ${model.score} · 击破 ${model.kills}`, size: 22, fill: '#9ec8d4',
-    });
+    if (progress > 0) {
+        cmds.push({
+            id: 'hudProgress', kind: 'rect',
+            x: 42 + 318 * progress, y: 92, w: Math.max(4, 636 * progress), h: 8,
+            fill: weapon.color, radius: 0,
+        });
+    }
+
+    pushPixelPlaque(cmds, 'hudScore', W / 2, H - 40, 360, 40, '#2b3540', '#7a8894');
+    pushOutlinedText(cmds, 'hudScoreText', W / 2, H - 40, `得分 ${model.score} · 击破 ${model.kills}`, 18, '#fff6e8');
 }
 
 function drawPanel(
@@ -459,24 +566,42 @@ function drawPanel(
     model: ZombieGateModel,
     hover: { x: number; y: number } | null,
 ) {
+    // Wooden / dungeon plaque frame (SK difficulty sign vibe).
+    pushPixelPlaque(cmds, 'panel', W / 2, 760, 500, 210, '#3a2a1c', '#8a6a48');
     cmds.push({
-        id: 'panel', kind: 'rect',
-        x: W / 2, y: 760, w: 520, h: 220, fill: '#0d1c24', radius: 12, stroke: '#3d6f82', line: 3,
+        id: 'panelInner', kind: 'rect',
+        x: W / 2, y: 760, w: 470, h: 180, fill: '#241810', radius: 0,
     });
     const title = model.phase === 'ready' ? '向僵尸开炮 · 前期'
         : model.phase === 'won' ? '前线守住！' : '鱼群覆灭';
     const sub = model.phase === 'ready'
         ? '格子换道 · 过门成长 · 自动射击'
         : `得分 ${model.score}  人数峰值 ${model.peakUnits}`;
-    cmds.push({ id: 'title', kind: 'text', x: W / 2, y: 720, text: title, size: 40, bold: true, fill: '#e8f7ff' });
-    cmds.push({ id: 'sub', kind: 'text', x: W / 2, y: 768, text: sub, size: 22, fill: '#9ec8d4' });
-    const btnFill = hover && hover.x >= 124 && hover.x <= 596 && hover.y >= 812 && hover.y <= 898
-        ? '#3aa0b8' : '#2a7f94';
-    cmds.push({ id: 'button', kind: 'rect', x: W / 2, y: 855, w: 360, h: 86, fill: btnFill, radius: 10 });
+    pushOutlinedText(cmds, 'title', W / 2, 710, title, 34, '#fff6e8');
+    cmds.push({ id: 'sub', kind: 'text', x: W / 2, y: 758, text: sub, size: 18, bold: true, fill: '#c8b090' });
+
+    const hot = !!(hover && hover.x >= 124 && hover.x <= 596 && hover.y >= 812 && hover.y <= 898);
+    const btnFill = hot ? '#3aa0b8' : '#2a7f94';
+    // Chunky CTA with black outline (not rounded pill).
     cmds.push({
-        id: 'buttonText', kind: 'text',
-        x: W / 2, y: 855,
-        text: model.phase === 'ready' ? '开始战斗' : model.phase === 'won' ? '再来一局' : '重新挑战',
-        size: 32, bold: true, fill: '#ffffff',
+        id: 'buttonOut', kind: 'rect',
+        x: W / 2, y: 855, w: 366, h: 92, fill: '#141414', radius: 0,
     });
+    cmds.push({
+        id: 'button', kind: 'rect',
+        x: W / 2, y: 855, w: 354, h: 80, fill: btnFill, radius: 0,
+    });
+    cmds.push({
+        id: 'buttonHi', kind: 'rect',
+        x: W / 2, y: 855 - 34, w: 340, h: 4, fill: '#7fd0e0', radius: 0,
+    });
+    pushOutlinedText(
+        cmds,
+        'buttonText',
+        W / 2,
+        855,
+        model.phase === 'ready' ? '开始战斗' : model.phase === 'won' ? '再来一局' : '重新挑战',
+        30,
+        '#ffffff',
+    );
 }

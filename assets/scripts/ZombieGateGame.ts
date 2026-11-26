@@ -179,7 +179,8 @@ export class ZombieGateGame extends Component {
                 l.verticalAlign = VerticalTextAlignment.CENTER;
                 l.overflow = Label.Overflow.NONE;
                 l.enableWrapText = false;
-                l.fontFamily = 'Arial, Microsoft YaHei, sans-serif';
+                // Prefer chunky UI faces closer to Soul Knight HUD readability.
+                l.fontFamily = 'Arial Black, Impact, Microsoft YaHei, sans-serif';
             } else if (item.sprite) {
                 item.sprite.sizeMode = Sprite.SizeMode.CUSTOM;
                 const frame = this.frames[c.asset as 'fish' | 'squirrel'] ?? null;

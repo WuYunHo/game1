@@ -7,7 +7,7 @@ const {
 const { GATE_DEFS, WEAPON_CRATE_DEFS, resolveGateDef } = require('../assets/scripts/ZombieGateConfig.ts');
 const {
     composeZombieGate, laneToX, worldToScreenY, laneFromX, BOARD_COLS, BORDER_LEFT, BORDER_RIGHT,
-    GATE_COLS_LEFT, GATE_COLS_RIGHT,
+    GATE_COLS_LEFT, GATE_COLS_RIGHT, TILE_W, FISH_DRAW_PX, ENEMY_DRAW_PX, TANK_DRAW_PX,
 } = require('../assets/scripts/ZombieGatePresentation.ts');
 
 const play = () => {
@@ -70,7 +70,7 @@ test('displayLane eases toward logical lane after a discrete shift', () => {
     assert.ok(Math.abs(m.displayLane - 1) < 1e-6);
 });
 
-test('sideForLane splits evenly for equal 5-tile gates', () => {
+test('sideForLane splits evenly for equal-width gates', () => {
     assert.equal(sideForLane(0), 'left');
     assert.equal(sideForLane(1), 'left');
     assert.equal(sideForLane(2), 'right');
@@ -265,21 +265,33 @@ test('surviving until duration wins', () => {
     assert.equal(m.phase, 'won');
 });
 
-test('board is 12 cols with side borders and fills screen mapping', () => {
-    assert.equal(BOARD_COLS, 12);
+test('board is 22 cols with denser tiles and side borders', () => {
+    assert.equal(BOARD_COLS, 22);
     assert.equal(BORDER_LEFT, 0);
-    assert.equal(BORDER_RIGHT, 11);
+    assert.equal(BORDER_RIGHT, 21);
     assert.equal(laneFromX(0), 0);
     assert.equal(laneFromX(719), 4);
-    assert.ok(laneToX(0) > 60); // inside playable, not on left border
-    assert.ok(laneToX(4) < 660);
+    assert.ok(laneToX(0) > TILE_W); // inside playable, not on left border
+    assert.ok(laneToX(4) < 700);
 });
 
-test('left and right gates are the same 5-tile footprint', () => {
-    assert.equal(GATE_COLS_LEFT.length, 5);
-    assert.equal(GATE_COLS_RIGHT.length, 5);
-    assert.deepEqual([...GATE_COLS_LEFT], [1, 2, 3, 4, 5]);
-    assert.deepEqual([...GATE_COLS_RIGHT], [6, 7, 8, 9, 10]);
+test('left and right gates are the same 10-tile footprint', () => {
+    assert.equal(GATE_COLS_LEFT.length, 10);
+    assert.equal(GATE_COLS_RIGHT.length, 10);
+    assert.deepEqual([...GATE_COLS_LEFT], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    assert.deepEqual([...GATE_COLS_RIGHT], [11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+});
+
+test('units span about 1.5~2 floor tiles like Soul Knight', () => {
+    assert.ok(Math.abs(TILE_W - 720 / 22) < 0.01);
+    const fishTiles = FISH_DRAW_PX / TILE_W;
+    const enemyTiles = ENEMY_DRAW_PX / TILE_W;
+    const tankTiles = TANK_DRAW_PX / TILE_W;
+    assert.ok(fishTiles >= 1.5 && fishTiles <= 2.0, `fish ${fishTiles.toFixed(2)} tiles`);
+    assert.ok(enemyTiles >= 1.5 && enemyTiles <= 2.1, `enemy ${enemyTiles.toFixed(2)} tiles`);
+    assert.ok(tankTiles >= 1.8 && tankTiles <= 2.3, `tank ${tankTiles.toFixed(2)} tiles`);
+    assert.ok(FISH_DRAW_PX <= ENEMY_DRAW_PX);
+    assert.ok(ENEMY_DRAW_PX < TANK_DRAW_PX);
 });
 
 test('presentation draws crates and keeps command ids unique', () => {
